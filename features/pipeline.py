@@ -220,6 +220,132 @@ def build_nhl_player_features(db_path: str) -> pl.DataFrame:
     return df
 
 
+# ── injury features ──────────────────────────────────────────────────────────
+
+def add_injury_features(df: pl.DataFrame, sport: str, db_path: str) -> pl.DataFrame:
+    """Join injury impact features onto a team game feature DataFrame.
+
+    For historical training rows: derives injury proxy from minutes played
+    (players with minutes far below their rolling average were likely limited).
+
+    For live prediction rows (today's games): reads the current ESPN injury
+    report and computes team-level impact scores.
+
+    Adds columns:
+      injured_pts_lost      - rolling avg pts of players who didn't play / were limited
+      injured_pts_lost_opp  - same for the opponent
+      star_out              - 1 if a top-3 minutes player on the team missed the game
+      star_out_opp          - same for the opponent
+      questionable_count    - number of day-to-day players on the team (live only)
+    """
+    conn = sqlite3.connect(db_path)
+
+    # ── historical proxy (works on past games) ────────────────────────────────
+    if sport == "nba":
+        player_table = "nba_player_games"
+        pts_col = "pts"
+        min_col = "min"
+    else:
+        player_table = "nhl_player_games"
+        pts_col = "goals"
+        min_col = "toi"
+
+    try:
+        players = pl.read_database(
+            f"SELECT game_id, team_id, player_id, {pts_col}, {min_col} FROM {player_table}",
+            conn
+        )
+    except Exception:
+        conn.close()
+        return df
+
+    conn.close()
+
+    if players.is_empty():
+        return df
+
+    # parse minutes to float
+    players = players.with_columns(
+        pl.col(min_col).str.split(":").list.first().cast(pl.Float32, strict=False).alias("minutes_played")
+    )
+
+    # rolling average minutes per player (shift to avoid leakage)
+    players = players.sort(["player_id", "game_id"]).with_columns(
+        pl.col("minutes_played")
+        .shift(1)
+        .rolling_mean(window_size=10, min_samples=3)
+        .over("player_id")
+        .alias("minutes_roll10")
+    )
+
+    # flag players who played <40% of their rolling average (injured/DNP proxy)
+    players = players.with_columns(
+        (
+            (pl.col("minutes_played") < pl.col("minutes_roll10") * 0.4) |
+            pl.col("minutes_played").is_null()
+        ).cast(pl.Int8).alias("was_limited")
+    )
+
+    # identify top-3 minutes players per team per game (stars)
+    players = players.with_columns(
+        pl.col("minutes_roll10")
+        .rank(method="ordinal", descending=True)
+        .over(["game_id", "team_id"])
+        .alias("minutes_rank")
+    )
+
+    # team-level aggregates per game
+    team_injury = players.group_by(["game_id", "team_id"]).agg([
+        (pl.col("was_limited") * pl.col(pts_col)).sum().alias("injured_pts_lost"),
+        (
+            (pl.col("was_limited") == 1) & (pl.col("minutes_rank") <= 3)
+        ).any().cast(pl.Int8).alias("star_out"),
+    ])
+
+    # join home team injury features
+    df = df.join(team_injury, on=["game_id", "team_id"], how="left")
+
+    # join opponent injury features
+    opp_injury = team_injury.rename({
+        "team_id": "opp_team_id",
+        "injured_pts_lost": "injured_pts_lost_opp",
+        "star_out": "star_out_opp",
+    })
+    df = df.join(opp_injury, on=["game_id", "opp_team_id"], how="left")
+
+    # ── live injury report (today's games only) ───────────────────────────────
+    # Add questionable_count from the ESPN snapshot if available
+    try:
+        live_conn = sqlite3.connect(db_path)
+        latest = live_conn.execute(
+            "SELECT MAX(fetched_at) FROM injury_reports WHERE sport = ?", (sport,)
+        ).fetchone()[0]
+
+        if latest:
+            live = pl.read_database(
+                f"SELECT team_name, status FROM injury_reports WHERE sport = '{sport}' AND fetched_at = '{latest}'",
+                live_conn
+            )
+            dtd = (
+                live.filter(pl.col("status") == "Day-To-Day")
+                .group_by("team_name")
+                .agg(pl.len().alias("questionable_count"))
+            )
+            # join on team name — only enriches rows where team_name is present
+            if "team_name" in df.columns:
+                df = df.join(dtd, on="team_name", how="left")
+        live_conn.close()
+    except Exception:
+        pass
+
+    return df.with_columns([
+        pl.col("injured_pts_lost").fill_null(0),
+        pl.col("injured_pts_lost_opp").fill_null(0),
+        pl.col("star_out").fill_null(0),
+        pl.col("star_out_opp").fill_null(0),
+    ])
+
+
 # ── odds join ─────────────────────────────────────────────────────────────────
 
 def add_odds_features(df: pl.DataFrame, sport: str, db_path: str) -> pl.DataFrame:
