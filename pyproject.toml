@@ -9,6 +9,7 @@ dependencies = [
     "lightgbm",
     "scikit-learn",
     "numpy",
+    "pyarrow",
     "python-dotenv",
     "tqdm",
 ]
