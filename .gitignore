@@ -5,5 +5,4 @@ data/*.csv
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-models/*.pkl
-models/*.json
+models/artifacts/
