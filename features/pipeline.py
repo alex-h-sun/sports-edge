@@ -54,11 +54,13 @@ def build_nba_game_features(db_path: str) -> pl.DataFrame:
     """
     df = _read(db_path, "SELECT * FROM nba_team_games ORDER BY game_date")
 
+    if df.is_empty():
+        raise ValueError("nba_team_games is empty. Run fetch_seasons() first.")
+
     df = df.with_columns([
         pl.col("game_date").cast(pl.Date),
-        pl.col("wl").eq("W").cast(pl.Int8).alias("win"),
-        # home flag: matchup like "BOS vs. NYK" = home, "BOS @ NYK" = away
-        pl.col("matchup").str.contains(" vs. ").cast(pl.Int8).alias("is_home"),
+        pl.col("wl").fill_null("L").eq("W").cast(pl.Int8).alias("win"),
+        pl.col("matchup").fill_null("").str.contains(" vs. ").cast(pl.Int8).alias("is_home"),
     ])
 
     # rolling stats (5 and 10 game)
