@@ -1,0 +1,48 @@
+# Curated court-speed reference. APPROXIMATE values compiled from public ITF
+# Court Pace Index (CPI) category ratings and Tennis Abstract surface-speed
+# analysis. speed_index is a 0-100 scale (higher = faster); cpi_category uses
+# the ITF labels (Slow, Medium-Slow, Medium, Medium-Fast, Fast).
+# tourney_name should match Sackmann tourney_name after normalization.
+# Tournaments not listed here fall back to the surface default rows below.
+tourney_name,surface,speed_index,cpi_category
+Australian Open,Hard,52,Medium
+Roland Garros,Clay,30,Slow
+French Open,Clay,30,Slow
+Wimbledon,Grass,68,Medium-Fast
+Us Open,Hard,58,Medium-Fast
+US Open,Hard,58,Medium-Fast
+Indian Wells Masters,Hard,38,Medium-Slow
+Indian Wells,Hard,38,Medium-Slow
+Miami Masters,Hard,48,Medium
+Miami,Hard,48,Medium
+Monte Carlo Masters,Clay,28,Slow
+Madrid Masters,Clay,42,Medium
+Rome Masters,Clay,32,Slow
+Italian Open,Clay,32,Slow
+Canada Masters,Hard,60,Medium-Fast
+Canadian Open,Hard,60,Medium-Fast
+Cincinnati Masters,Hard,66,Fast
+Cincinnati,Hard,66,Fast
+Shanghai Masters,Hard,64,Fast
+Paris Masters,Hard,70,Fast
+Tour Finals,Hard,62,Fast
+Dubai,Hard,56,Medium-Fast
+Doha,Hard,50,Medium
+Qatar Open,Hard,50,Medium
+Barcelona,Clay,30,Slow
+Hamburg,Clay,29,Slow
+Munich,Clay,31,Slow
+Stuttgart,Grass,64,Medium-Fast
+Halle,Grass,66,Fast
+Queens Club,Grass,67,Fast
+Eastbourne,Grass,65,Medium-Fast
+Beijing,Hard,55,Medium-Fast
+China Open,Hard,55,Medium-Fast
+Wuhan,Hard,54,Medium-Fast
+Charleston,Clay,35,Medium-Slow
+Strasbourg,Clay,33,Slow
+# Surface fallbacks (used when a tournament is not listed above)
+_DEFAULT_,Hard,52,Medium
+_DEFAULT_,Clay,32,Slow
+_DEFAULT_,Grass,65,Medium-Fast
+_DEFAULT_,Carpet,72,Fast

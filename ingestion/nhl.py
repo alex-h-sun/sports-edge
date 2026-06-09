@@ -78,6 +78,24 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (game_id, player_id)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS nhl_goalie_games (
+            game_id       INTEGER,
+            player_id     INTEGER,
+            season        INTEGER,
+            game_type     INTEGER,
+            game_date     TEXT,
+            team_id       INTEGER,
+            starter       INTEGER,
+            decision      TEXT,
+            saves         INTEGER,
+            shots_against INTEGER,
+            goals_against INTEGER,
+            save_pct      REAL,
+            toi           TEXT,
+            PRIMARY KEY (game_id, player_id)
+        )
+    """)
     conn.commit()
 
 
@@ -101,8 +119,17 @@ def _game_ids_for_season(season: str, game_type: int) -> list[int]:
     return game_ids
 
 
-def _parse_boxscore(game_id: int) -> tuple[list[dict], list[dict]]:
-    """Return (team_rows, player_rows) parsed from a boxscore."""
+def _parse_save_shots(s) -> tuple[int, int]:
+    """Parse the NHL 'saves/shotsAgainst' string (e.g. '29/31') -> (saves, shots)."""
+    try:
+        saves, shots = str(s).split("/")
+        return int(saves), int(shots)
+    except Exception:
+        return 0, 0
+
+
+def _parse_boxscore(game_id: int) -> tuple[list[dict], list[dict], list[dict]]:
+    """Return (team_rows, player_rows, goalie_rows) parsed from a boxscore."""
     data = _get(f"{_BASE}/gamecenter/{game_id}/boxscore")
 
     season = data["season"]
@@ -136,6 +163,7 @@ def _parse_boxscore(game_id: int) -> tuple[list[dict], list[dict]]:
     ]
 
     player_rows: list[dict] = []
+    goalie_rows: list[dict] = []
     pgs = data.get("playerByGameStats", {})
     for side_key, team in (("homeTeam", home), ("awayTeam", away)):
         side = pgs.get(side_key, {})
@@ -154,7 +182,20 @@ def _parse_boxscore(game_id: int) -> tuple[list[dict], list[dict]]:
                     "faceoff_pct": p.get("faceoffWinningPctg", None),
                     "toi": p.get("toi", ""),
                 })
-    return team_rows, player_rows
+        for g in side.get("goalies", []):
+            saves, shots_against = _parse_save_shots(g.get("saveShotsAgainst"))
+            goalie_rows.append({
+                "game_id": game_id, "player_id": g["playerId"],
+                "season": season, "game_type": game_type,
+                "game_date": game_date, "team_id": team["id"],
+                "starter": int(bool(g.get("starter", False))),
+                "decision": g.get("decision", ""),
+                "saves": saves, "shots_against": shots_against,
+                "goals_against": max(shots_against - saves, 0),
+                "save_pct": g.get("savePctg", None),
+                "toi": g.get("toi", ""),
+            })
+    return team_rows, player_rows, goalie_rows
 
 
 def _upsert(conn: sqlite3.Connection, table: str, rows: list[dict]) -> None:
@@ -179,24 +220,27 @@ def fetch_seasons(seasons: list[str], db_path: str) -> None:
             game_ids = _game_ids_for_season(season, game_type)
             print(f"{len(game_ids)} games")
 
-            team_buf, player_buf = [], []
+            team_buf, player_buf, goalie_buf = [], [], []
             for i, gid in enumerate(game_ids, 1):
                 try:
-                    t_rows, p_rows = _parse_boxscore(gid)
+                    t_rows, p_rows, g_rows = _parse_boxscore(gid)
                     team_buf.extend(t_rows)
                     player_buf.extend(p_rows)
+                    goalie_buf.extend(g_rows)
                 except Exception as e:
                     print(f"    warning: game {gid} failed ({e})")
                 if i % 50 == 0:
                     _upsert(conn, "nhl_team_games", team_buf)
                     _upsert(conn, "nhl_player_games", player_buf)
-                    team_buf, player_buf = [], []
+                    _upsert(conn, "nhl_goalie_games", goalie_buf)
+                    team_buf, player_buf, goalie_buf = [], [], []
                     print(f"    ...{i}/{len(game_ids)}")
                 time.sleep(_RATE_LIMIT)
 
             _upsert(conn, "nhl_team_games", team_buf)
             _upsert(conn, "nhl_player_games", player_buf)
-            print(f"    done: {len(game_ids) * 2} team rows, {len(player_buf)} player rows saved")
+            _upsert(conn, "nhl_goalie_games", goalie_buf)
+            print(f"    done: {len(game_ids) * 2} team rows saved")
 
     conn.close()
 
@@ -209,7 +253,7 @@ def fetch_recent_games(days_back: int, db_path: str, season: str = CURRENT_SEASO
     _ensure_tables(conn)
 
     seen: set[int] = set()
-    team_rows, player_rows = [], []
+    team_rows, player_rows, goalie_rows = [], [], []
 
     for abbrev in ACTIVE_TEAMS:
         url = f"{_BASE}/club-schedule-season/{abbrev}/{season}"
@@ -225,9 +269,10 @@ def fetch_recent_games(days_back: int, db_path: str, season: str = CURRENT_SEASO
                     and gid not in seen):
                 seen.add(gid)
                 try:
-                    t, p = _parse_boxscore(gid)
+                    t, p, gl = _parse_boxscore(gid)
                     team_rows.extend(t)
                     player_rows.extend(p)
+                    goalie_rows.extend(gl)
                 except Exception as e:
                     print(f"  warning: game {gid} failed ({e})")
                 time.sleep(_RATE_LIMIT)
@@ -235,5 +280,6 @@ def fetch_recent_games(days_back: int, db_path: str, season: str = CURRENT_SEASO
 
     _upsert(conn, "nhl_team_games", team_rows)
     _upsert(conn, "nhl_player_games", player_rows)
-    print(f"  NHL recent ({days_back}d): {len(seen)} games, {len(team_rows)} team rows, {len(player_rows)} player rows")
+    _upsert(conn, "nhl_goalie_games", goalie_rows)
+    print(f"  NHL recent ({days_back}d): {len(seen)} games, {len(team_rows)} team rows, {len(goalie_rows)} goalie rows")
     conn.close()

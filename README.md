@@ -67,6 +67,74 @@ streamlit run dashboard.py
 0 11 * * * cd /path/to/sports-edge && python run.py >> logs/daily.log 2>&1
 ```
 
+### Backtest on a held-out season
+
+```bash
+python run.py --backtest --sport nba    # train on < 2025-10-01, score the 2025-26 season
+python run.py --backtest --sport all    # NBA + NHL + tennis
+```
+
+`--backtest` trains every market on data *before* the held-out season
+(`HOLDOUT_START = 2025-10-01`, tennis `2025-01-01`) and reports metrics on the
+never-seen test season — an honest estimate of real-world accuracy, stricter than
+the rolling `TimeSeriesSplit` CV. It saves `_holdout`-suffixed artifacts so it
+**never overwrites the production models**, reads the existing DB (no ingest), and
+finds no edges. For live betting use plain `--train`, which fits on all data
+including the current season.
+
+### How often to run (don't skip more than 7 days)
+
+A plain `python run.py` re-ingests only a **rolling 7-day window** of games
+(`fetch_recent_games(days_back=7)`), deduped by primary key via `INSERT OR REPLACE`
+— so the full history is never re-pulled, and new games are the only ones added.
+
+The consequence: **run it at least once every 7 days** to keep the game-log table
+gap-free. Any game that finished more than 7 days before a run is never requested,
+and the hole does not self-heal on later runs (the window has moved past it).
+
+- **Daily** (the cron above) — ideal; 6 days of overlap slack absorbs missed days.
+- **≤ 7 days** — fine, no gaps.
+- **> 7 days** — you'll miss games. Backfill with
+  `python run.py --ingest-history --sport <sport>` (or temporarily raise `days_back`).
+
+This 7-day rule is only about keeping **historical game logs** complete for training.
+**Odds are separate**: the free tier stores only live pulls and can't be backfilled,
+so for actual betting run near game time on the days you bet — not just weekly.
+
+### Using The Odds API efficiently (free tier)
+
+The free tier is **500 requests per month** (resets monthly), not per day. The
+catch: a request is **not** one HTTP call — your quota is debited by
+**markets × regions**. One `/odds` pull for the `us` region with `h2h,spreads,totals`
+(3 markets) costs **3**, two regions costs **6**. Player props cost **1 request per
+event per prop market** (`fetch_props` loops events × prop keys), so they are by far
+the most expensive call. Listing sports (`/sports`) is free.
+
+The repo tracks your balance for you: every response's `x-requests-remaining` /
+`x-requests-used` headers are logged to the `odds_requests_remaining` table and
+printed after each fetch (`ingestion/odds.py:_log_quota`). Check it without spending
+a request via `get_quota(db_path)`.
+
+To stay under 500/month:
+
+- **Request only the markets you price.** Drop `spreads` if you only bet totals —
+  each market you add is +1 per call.
+- **One region (`us`).** Add `uk`/`eu` only for line-shopping; each region multiplies
+  the cost.
+- **Run props sparingly.** A full props sweep of one slate is `events × prop_markets`
+  requests (e.g. 8 games × 5 NBA prop keys = 40). Pull props once near lock, not on
+  every cron tick.
+- **Batch into one daily pull** instead of polling — the cron above runs once at 11:00.
+- **Never use the historical-odds endpoints on the free tier.** They cost **10×** per
+  market. This is also why the `mkt_*` model features stay null at first: the pipeline
+  only stores live pulls and does not backfill odds history.
+- **Skip the odds fetch when iterating** with `python run.py --no-odds` (uses cached
+  snapshots, burns zero quota).
+
+A rough budget: NBA + NHL moneyline+totals (2 markets, 1 region) ≈ 4 requests/day ≈
+120/month — leaving headroom for occasional props. Adding daily props quickly exhausts
+the tier, so reserve them for games you actually intend to bet.
+
 ---
 
 ## Data Sources
@@ -123,7 +191,19 @@ Serialized to `models/artifacts/<sport>_<market>.pkl`.
 
 **Player features** (rolling 5 and 10-game windows): per-stat averages, minutes trend, days rest, home/away splits.
 
+**Injury / WOWY features** (with-or-without-you): absences are inferred directly from the boxscores (a seasonal-roster player with no row for a game did not play). From that backbone the team models get `wowy_margin_delta` (the team's historical scoring-margin swing from the players currently out), `key_players_out`, and `out_min_share` (plus opponent mirrors); the player-props models get `teammate_out_min_share` and `lead_teammate_out` (how a player's role opens up when a key teammate is out). All with/without splits use strictly prior games to avoid leakage.
+
 **Odds features**: implied probability, vig-adjusted fair odds.
+
+### Deep-learning bake-off
+
+NBA/NHL moneyline can also be trained as a multi-model bake-off (LightGBM, XGBoost, a PyTorch MLP, and an ensemble) via `models/compare_team.py`, mirroring the tennis bake-off. Heavy/MLP training runs on Colab GPU (`notebooks/team_train_colab.ipynb`); the best **portable** model is saved for torch-free local serving. See `docs/TRAINING_MLP.md`.
+
+```bash
+python run.py --export-features --sport nba   # dump features for Colab
+python run.py --compare --sport nba           # run the bake-off (local or Colab)
+python run.py --import-models                 # pull cloud-trained artifacts back
+```
 
 ### Evaluation metrics
 

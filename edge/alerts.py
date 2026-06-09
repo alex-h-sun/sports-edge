@@ -5,6 +5,8 @@ import json
 from datetime import date
 from pathlib import Path
 
+from edge.calculator import american_to_decimal
+
 
 def print_edges(edges: list[dict]) -> None:
     """Pretty-print edge bets to stdout."""
@@ -19,7 +21,7 @@ def print_edges(edges: list[dict]) -> None:
     for e in edges:
         edge_pct = f"{e['edge']*100:.1f}%"
         stake    = f"${e['kelly_stake']:.2f}"
-        odds_str = f"+{e['odds']}" if e['odds'] > 0 else str(e['odds'])
+        odds_str = f"{american_to_decimal(e['odds']):.2f}"
 
         print(f"\n  {e['sport']} | {e['market']}")
         print(f"  Game:  {e['game']}")
@@ -45,11 +47,15 @@ def save_edges(edges: list[dict], output_dir: str = "data/edges") -> Path:
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"edges_{date.today().isoformat()}.csv"
 
-    fieldnames = list(edges[0].keys())
+    rows = [
+        {**e, "odds_decimal": round(american_to_decimal(e["odds"]), 2)}
+        for e in edges
+    ]
+    fieldnames = list(rows[0].keys())
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(edges)
+        writer.writerows(rows)
 
     print(f"  Saved {len(edges)} edges to {path}")
     return path

@@ -45,6 +45,21 @@ NHL_PROP_KEYS = [
 # Bookmakers to request (free tier supports all of these)
 BOOKMAKERS = "draftkings,fanduel,betmgm,caesars"
 
+# The Odds API splits tennis by tournament. These are the active ATP/WTA keys;
+# inactive tournaments simply return no events (and cost no quota beyond the call).
+TENNIS_SPORT_KEYS = [
+    "tennis_atp_aus_open_singles", "tennis_atp_french_open", "tennis_atp_wimbledon",
+    "tennis_atp_us_open", "tennis_atp_indian_wells", "tennis_atp_miami_open",
+    "tennis_atp_monte_carlo_masters", "tennis_atp_madrid_open", "tennis_atp_italian_open",
+    "tennis_atp_canadian_open", "tennis_atp_cincinnati_open", "tennis_atp_shanghai_masters",
+    "tennis_atp_paris_masters", "tennis_atp_dubai", "tennis_atp_qatar_open",
+    "tennis_wta_aus_open_singles", "tennis_wta_french_open", "tennis_wta_wimbledon",
+    "tennis_wta_us_open", "tennis_wta_indian_wells", "tennis_wta_miami_open",
+    "tennis_wta_madrid_open", "tennis_wta_italian_open", "tennis_wta_canadian_open",
+    "tennis_wta_cincinnati_open", "tennis_wta_china_open", "tennis_wta_wuhan_open",
+    "tennis_wta_dubai", "tennis_wta_qatar_open", "tennis_wta_queens_club_champ",
+]
+
 
 def _get_api_key() -> str:
     key = os.getenv("ODDS_API_KEY")
@@ -233,6 +248,68 @@ def fetch_props(sport: str, db_path: str) -> None:
     )
     conn.commit()
     print(f"  Props done: {len(rows)} rows")
+    conn.close()
+
+
+def fetch_tennis_odds(db_path: str, markets: list[str] | None = None) -> None:
+    """Pull current tennis odds across all active tournament keys.
+
+    Writes rows with sport='tennis' into the shared odds_snapshots table. The Odds
+    API exposes tennis per-tournament, so we loop the keys; inactive ones return [].
+    """
+    api_key = _get_api_key()
+    markets = markets or ["moneyline", "spread", "totals"]
+    market_param = ",".join(MARKET_KEYS[m] for m in markets if m in MARKET_KEYS)
+
+    conn = _get_conn(db_path)
+    _ensure_tables(conn)
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    total_events = total_rows = 0
+
+    for sport_key in TENNIS_SPORT_KEYS:
+        try:
+            resp = requests.get(
+                f"{_BASE}/sports/{sport_key}/odds",
+                params={
+                    "apiKey": api_key,
+                    "regions": "us",
+                    "markets": market_param,
+                    "bookmakers": BOOKMAKERS,
+                    "oddsFormat": "american",
+                },
+                timeout=15,
+            )
+            if resp.status_code == 422:
+                continue  # tournament not currently offered
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"    warning: {sport_key} failed ({e})")
+            continue
+
+        _log_quota(conn, resp)
+        events = resp.json()
+        rows = []
+        for event in events:
+            for book in event.get("bookmakers", []):
+                for mkt in book.get("markets", []):
+                    for outcome in mkt.get("outcomes", []):
+                        rows.append((
+                            "tennis", event["id"], event.get("home_team", ""),
+                            event.get("away_team", ""), event.get("commence_time", ""),
+                            book["key"], mkt["key"], outcome["name"],
+                            outcome["price"], outcome.get("point"), fetched_at,
+                        ))
+        if rows:
+            conn.executemany(
+                "INSERT INTO odds_snapshots VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)", rows
+            )
+            conn.commit()
+        total_events += len(events)
+        total_rows += len(rows)
+        time.sleep(0.2)
+
+    print(f"  Tennis odds: {total_events} matches, {total_rows} odds rows")
     conn.close()
 
 

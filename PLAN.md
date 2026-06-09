@@ -4,8 +4,9 @@
 Scrape historical sports data, train ML models to predict game/player outcomes, and identify positive expected-value bets by comparing model probabilities against live sportsbook odds.
 
 ## Sports & Markets
-- **Sports:** NBA, NHL
-- **Markets:** Moneyline, Spread, Totals (O/U), Player Props
+- **Sports:** NBA, NHL, Tennis (ATP + WTA)
+- **Markets (NBA/NHL):** Moneyline, Spread, Totals (O/U), Player Props
+- **Markets (Tennis):** Match winner, Totals (game O/U), Spread (game handicap)
 
 ---
 
@@ -18,11 +19,19 @@ SQLite        Polars DFs   .pkl      stdout / CSV
 ```
 
 ### Data sources
-| Layer | NBA | NHL |
-|---|---|---|
-| Game logs | `nba_api` (LeagueGameLog) | NHL Stats API (api.nhle.com) |
-| Player stats | `nba_api` (PlayerGameLogs) | NHL Stats API |
-| Live odds | The Odds API | The Odds API |
+| Layer | NBA | NHL | Tennis |
+|---|---|---|---|
+| Game/match logs | `nba_api` (LeagueGameLog) | NHL Stats API (api.nhle.com) | Sackmann tennis_atp/tennis_wta CSVs |
+| Player stats | `nba_api` (PlayerGameLogs) | NHL Stats API | (per-match serve/return stats in Sackmann) |
+| Weather | — | — | Open-Meteo Historical Archive API |
+| Court speed | — | — | Curated `data/court_speed.csv` (ITF CPI) |
+| Locations/altitude | — | — | Curated `data/tournament_locations.csv` |
+| Live odds | The Odds API | The Odds API | The Odds API (`tennis_atp_*`, `tennis_wta_*`) |
+
+Tennis-derived signals (computed in the feature pipeline, no extra source):
+surface-specific Elo, overall + surface H2H, rolling form/serve/return rates,
+rest + 14-day fatigue (uses a per-round synthetic date so trailing windows do
+not leak later-round results), weather/altitude interactions.
 
 ---
 
@@ -30,14 +39,19 @@ SQLite        Polars DFs   .pkl      stdout / CSV
 
 ### Phase 1 — Ingestion ✅ / 🔲
 - [x] `ingestion/nba.py` — team + player game logs, SQLite upsert
-- [ ] `ingestion/nhl.py` — team + player game logs, SQLite upsert
-- [ ] `ingestion/odds.py` — live odds via The Odds API (all 4 markets)
+- [x] `ingestion/nhl.py` — team + player game logs, SQLite upsert
+- [x] `ingestion/odds.py` — live odds via The Odds API (all 4 markets)
 
 ### Phase 2 — Feature Engineering
-- [ ] `features/pipeline.py`
+- [x] `features/pipeline.py`
   - Team features: rolling 5/10-game averages (PTS, FG%, REB, AST, TOV), rest days, home/away flag, win streak
   - Player features: rolling 5/10-game averages per stat, minutes trend, days rest, home/away splits
   - Odds features: opening vs. closing line movement, implied probability, vig-adjusted fair odds
+  - Injury / WOWY features: absences inferred from boxscores (roster player with no game row = out);
+    team-level `wowy_margin_delta` / `key_players_out` / `out_min_share` (+ opp mirrors) via
+    leakage-safe per-player with/without margins; teammate-level `teammate_out_min_share` /
+    `lead_teammate_out` for the props models. Backbone: `_wowy_long` / `_wowy_team_frame` /
+    `add_injury_features` / `add_teammate_wowy_features`.
 
 ### Phase 3 — Models
 One model per market. All trained with LightGBM, cross-validated on historical seasons.
@@ -49,19 +63,22 @@ One model per market. All trained with LightGBM, cross-validated on historical s
 | Totals | Total points scored | Regressor |
 | Player props | Player stat (pts/reb/ast/etc.) | Regressor per stat |
 
-- [ ] `models/train.py` — train + serialize each model to `models/artifacts/`
-- [ ] `models/evaluate.py` — AUC / Brier / MAE / RMSE + ROI backtest simulation
+- [x] `models/train.py` — train + serialize each model to `models/artifacts/`
+- [x] `models/evaluate.py` — AUC / Brier / MAE / RMSE + ROI backtest
+- [x] `models/compare_team.py` — NBA/NHL moneyline bake-off (LightGBM / XGBoost / PyTorch MLP /
+  ensemble) with TimeSeriesSplit; mirrors the tennis bake-off and reuses its fold trainers.
+  Heavy/MLP training on Colab GPU (`notebooks/team_train_colab.ipynb`); best portable model served.
 
 ### Phase 4 — Edge Detection
-- [ ] `edge/calculator.py`
+- [x] `edge/calculator.py`
   - Convert American odds → implied probability
   - Strip vig (additive method)
   - Edge = model_prob − fair_prob
   - Kelly stake = (edge × odds − (1 − edge)) / odds × fraction
-- [ ] `edge/alerts.py` — print and save positive-EV bets
+- [x] `edge/alerts.py` — print and save positive-EV bets
 
 ### Phase 5 — Runner / CLI
-- [ ] `run.py` — top-level script: ingest recent games → build features → load models → find edges → print/save alerts
+- [x] `run.py` — top-level script: ingest recent games → build features → load models → find edges → print/save alerts
 - [ ] Schedule via cron or launchd for daily pre-game runs
 
 ---
@@ -82,6 +99,21 @@ game_id, player_id, season, game_date, player_name, team_id, position, goals, as
 
 ### `odds_snapshots` *(to build)*
 snapshot_id, sport, game_id, game_date, bookmaker, market, outcome, price, point, fetched_at
+
+### Tennis tables
+- `tennis_matches` — raw Sackmann match rows (winner/loser format), PK (tour, tourney_id, match_num)
+- `tennis_matches_clean` — cleaned + score-parsed (total_games, game_margin, completed flag)
+- `tennis_court_speed`, `tennis_locations`, `tennis_weather` — curated/derived context
+- `tennis_features` — the wide one-big-table (one row per match-perspective; all
+  diff + context features + targets won/total_games/game_margin); rebuilt on each train/compare
+
+### Tennis model strategies (`models/compare.py`)
+**Separate ATP and WTA models** (artifacts `tennis_atp_*` / `tennis_wta_*`), trained
+on per-tour slices of the OBT. Bake-off compared by CV log-loss / Brier / AUC / ROI:
+Elo-only baseline, logistic regression, LightGBM, XGBoost (HistGradientBoosting
+fallback), PyTorch MLP, and an ensemble. Heavy training (incl. the MLP) runs on Colab
+GPU (`notebooks/tennis_train_colab.ipynb`, per-tour); the portable winner is saved for
+torch-free local serving. Exact MLP steps: `docs/TRAINING_MLP.md`.
 
 ---
 

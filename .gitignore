@@ -1,8 +1,18 @@
 .env
 .venv/
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.csv
+data/edges/
+data/exports/
+logs/
+*.egg-info/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
 models/artifacts/
+
+# Curated source data (small, hand-maintained — keep these despite data/*.csv above)
+!data/court_speed.csv
+!data/tournament_locations.csv

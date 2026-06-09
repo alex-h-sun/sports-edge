@@ -1,0 +1,41 @@
+# Curated tournament locations for weather joins (Open-Meteo) and altitude
+# features. lat/lon are venue-approximate; altitude_m in meters; indoor=1 means
+# roofed/indoor (weather treated as neutral). tourney_name matches Sackmann
+# tourney_name after normalization. Unlisted tournaments fall back to no weather.
+tourney_name,city,country,lat,lon,indoor,altitude_m
+Australian Open,Melbourne,AUS,-37.8216,144.9785,0,31
+Roland Garros,Paris,FRA,48.8470,2.2530,0,35
+French Open,Paris,FRA,48.8470,2.2530,0,35
+Wimbledon,London,GBR,51.4340,-0.2140,0,30
+Us Open,New York,USA,40.7500,-73.8450,0,11
+US Open,New York,USA,40.7500,-73.8450,0,11
+Indian Wells Masters,Indian Wells,USA,33.7240,-116.3050,0,17
+Indian Wells,Indian Wells,USA,33.7240,-116.3050,0,17
+Miami Masters,Miami,USA,25.9580,-80.2390,0,3
+Miami,Miami,USA,25.9580,-80.2390,0,3
+Monte Carlo Masters,Monte Carlo,MCO,43.7690,7.4280,0,30
+Madrid Masters,Madrid,ESP,40.4360,-3.6800,0,667
+Rome Masters,Rome,ITA,41.9340,12.4540,0,21
+Italian Open,Rome,ITA,41.9340,12.4540,0,21
+Canada Masters,Toronto,CAN,43.6580,-79.4170,0,76
+Canadian Open,Montreal,CAN,45.5040,-73.6190,0,36
+Cincinnati Masters,Cincinnati,USA,39.3650,-84.2680,0,267
+Cincinnati,Cincinnati,USA,39.3650,-84.2680,0,267
+Shanghai Masters,Shanghai,CHN,31.0850,121.3140,0,4
+Paris Masters,Paris,FRA,48.8380,2.2530,1,35
+Tour Finals,Turin,ITA,45.0710,7.6500,1,239
+Dubai,Dubai,UAE,25.2480,55.3650,0,5
+Doha,Doha,QAT,25.3290,51.4380,0,10
+Qatar Open,Doha,QAT,25.3290,51.4380,0,10
+Barcelona,Barcelona,ESP,41.3850,2.1980,0,12
+Hamburg,Hamburg,GER,53.5870,9.9320,0,8
+Munich,Munich,GER,48.1230,11.5430,0,520
+Stuttgart,Stuttgart,GER,48.7790,9.2300,0,245
+Halle,Halle,GER,52.0640,8.3580,0,100
+Queens Club,London,GBR,51.4840,-0.2130,0,10
+Eastbourne,Eastbourne,GBR,50.7680,0.2870,0,5
+Beijing,Beijing,CHN,39.9900,116.3170,0,44
+China Open,Beijing,CHN,39.9900,116.3170,0,44
+Wuhan,Wuhan,CHN,30.5040,114.4060,0,27
+Charleston,Charleston,USA,32.8000,-79.9560,0,3
+Strasbourg,Strasbourg,FRA,48.5830,7.7460,0,140

@@ -17,6 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["jupyter", "matplotlib", "seaborn", "ipykernel"]
+# Heavy ML deps for the tennis model bake-off (compare.py). Intended for the
+# cloud (Colab GPU) tier only — the core local install never needs these.
+tennis = ["torch", "xgboost"]
 
 [tool.setuptools.packages.find]
 where = ["."]
