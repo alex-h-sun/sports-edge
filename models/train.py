@@ -10,7 +10,7 @@ import polars as pl
 from sklearn.isotonic import IsotonicRegression
 from sklearn.model_selection import TimeSeriesSplit
 
-from models.evaluate import evaluate_classifier, evaluate_regressor
+from models.evaluate import evaluate_classifier, evaluate_regressor, simulate_roi
 
 # Start of the held-out test season. Passing holdout_start to the trainers excludes
 # every game on/after this date from fitting and instead scores the trained model on
@@ -271,6 +271,18 @@ def _holdout_eval(model: lgb.Booster, test_df, cols: list[str], target: str,
         m = evaluate_classifier(y, pred)
         print(f"  HOLDOUT test [{len(y)}]: log-loss {m['log_loss']:.4f}  "
               f"acc {m['accuracy']:.3f}  auc {m['auc']:.3f}")
+        # Profitability proxy: fractional-Kelly ROI vs vig-free fair odds (book_prob
+        # defaults to the realized base rate). No stored historical odds exist for
+        # past seasons, so this is the honest large-sample profit signal — positive
+        # ROI here means the model's confident picks beat a no-vig market; a real
+        # book takes a few % hold on top, so clear daylight above 0 is what matters.
+        r = simulate_roi(pred, y, book_prob=None)
+        if r["bets"]:
+            print(f"  HOLDOUT ROI:  {r['roi'] * 100:+.1f}%  on {r['bets']} bets "
+                  f"(hit {r['hit_rate'] * 100:.1f}%, staked {r['staked']:.1f}u, "
+                  f"profit {r['profit']:+.1f}u) vs no-vig fair odds")
+        else:
+            print("  HOLDOUT ROI:  no bets cleared min_edge vs fair odds")
     else:
         m = evaluate_regressor(y, pred)
         print(f"  HOLDOUT test [{len(y)}]: RMSE {m['rmse']:.2f}  MAE {m['mae']:.2f}")

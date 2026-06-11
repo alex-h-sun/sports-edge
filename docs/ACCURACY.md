@@ -79,6 +79,19 @@ production models. For live betting, plain `--train` fits on all data (including
 current season) because there is no reason to withhold data from a model you are
 actually deploying.
 
+### Profitability proxy (ROI)
+
+Accuracy (log-loss/AUC) does not tell you whether you would make money, so each
+moneyline holdout also prints a fractional-Kelly **ROI** via `simulate_roi`. Because
+no per-game historical odds are stored for past seasons (`odds_snapshots` only keeps
+recent live pulls), the benchmark is **vig-free fair odds derived from the realized
+base rate** — i.e. every game priced at the same fair line. This is an *optimistic
+upper bound*: a real book shortens favorites, so the absolute ROI overstates live
+profit. Read it as a *relative* signal (which markets clear zero, and by how much),
+not as expected return. True closing-line-value (`closing_line_value`) requires an
+accumulated per-game odds history we do not yet have, so CLV is reported only once
+real odds exist for the test games.
+
 ## What to run
 
 ```bash
