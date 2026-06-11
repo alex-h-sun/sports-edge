@@ -12,6 +12,10 @@ Raw LightGBM scores are not guaranteed to be calibrated probabilities, but
 (NBA/NHL/tennis) now fit an **isotonic calibrator** on a time-ordered holdout and
 store it in the artifact (`calibrator`). Serving applies it via
 `edge.calculator._predict_proba`. No-op for old artifacts without a calibrator.
+Isotonic calibrators saturate their tails to exactly 0/1, so serving additionally
+clamps the calibrated probability to `[0.02, 0.98]` (`PROB_FLOOR`/`PROB_CEIL`) —
+no real moneyline is a certainty, and an inflated tail probability would inflate
+both the edge and the Kelly stake.
 
 ### Distributional totals & props pricing
 Previously totals/props bet "Over if model > line" with a fabricated edge

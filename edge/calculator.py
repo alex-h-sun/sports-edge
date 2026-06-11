@@ -9,6 +9,11 @@ from scipy.stats import norm
 
 ARTIFACTS_DIR = Path(__file__).parent.parent / "models" / "artifacts"
 
+# Isotonic calibrators saturate their tails to exactly 0.0/1.0, and no real
+# sporting moneyline is a certainty. Clamp to a plausible band so an overconfident
+# tail probability cannot inflate the edge (and the Kelly stake) past reason.
+PROB_FLOOR, PROB_CEIL = 0.02, 0.98
+
 
 # ── odds math ─────────────────────────────────────────────────────────────────
 
@@ -80,7 +85,7 @@ def _predict_proba(artifact: dict, X: np.ndarray) -> np.ndarray:
     cal = artifact.get("calibrator")
     if cal is not None:
         raw = cal.predict(raw)
-    return np.clip(raw, 1e-6, 1 - 1e-6)
+    return np.clip(raw, PROB_FLOOR, PROB_CEIL)
 
 
 def _predict_mean_sigma(artifact: dict, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
