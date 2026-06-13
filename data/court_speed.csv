@@ -41,6 +41,28 @@ China Open,Hard,55,Medium-Fast
 Wuhan,Hard,54,Medium-Fast
 Charleston,Clay,35,Medium-Slow
 Strasbourg,Clay,33,Slow
+Rotterdam,Hard,72,Fast
+Rio Open,Clay,31,Slow
+Acapulco,Hard,62,Fast
+Washington,Hard,62,Fast
+Citi Open,Hard,62,Fast
+Tokyo,Hard,58,Medium-Fast
+Japan Open,Hard,58,Medium-Fast
+Vienna,Hard,68,Fast
+Basel,Hard,72,Fast
+Swiss Indoors,Hard,72,Fast
+Guadalajara,Clay,33,Slow
+Abierto GNP Seguros,Clay,33,Slow
+Adelaide International,Hard,55,Medium-Fast
+Adelaide,Hard,55,Medium-Fast
+Abu Dhabi,Hard,52,Medium
+Berlin,Grass,65,Medium-Fast
+Bad Homburg,Grass,65,Medium-Fast
+San Jose,Hard,60,Medium-Fast
+Silicon Valley Classic,Hard,60,Medium-Fast
+Seoul,Hard,56,Medium-Fast
+Korea Open,Hard,56,Medium-Fast
+Linz,Hard,68,Fast
 # Surface fallbacks (used when a tournament is not listed above)
 _DEFAULT_,Hard,52,Medium
 _DEFAULT_,Clay,32,Slow
