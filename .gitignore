@@ -16,3 +16,6 @@ models/artifacts/
 # Curated source data (small, hand-maintained — keep these despite data/*.csv above)
 !data/court_speed.csv
 !data/tournament_locations.csv
+
+# Local cross-session memory — not for GitHub
+.claude/CONTEXT.md
