@@ -15,6 +15,7 @@ arb rather than a steady income stream.
 
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from edge.calculator import american_to_decimal
 
@@ -31,7 +32,12 @@ def _latest_book_prices(
     Returns {(event_id, market, point): {"teams": (home, away),
                                          "outcomes": {outcome: {book: price}}}}.
     Ordering by fetched_at ascending means the last write per key wins (= latest).
+
+    Only events that have not yet started (`commence_time` in the future) are
+    returned — an arb is only real if both legs can still be placed, so stale odds
+    from already-completed games sitting in the history table must be excluded.
     """
+    now = datetime.now(timezone.utc).isoformat()
     placeholders = ",".join("?" for _ in markets)
     conn = sqlite3.connect(db_path)
     try:
@@ -41,9 +47,10 @@ def _latest_book_prices(
                    home_team, away_team, fetched_at
             FROM odds_snapshots
             WHERE sport = ? AND market IN ({placeholders})
+            AND commence_time > ?
             ORDER BY fetched_at ASC
             """,
-            (sport, *markets),
+            (sport, *markets, now),
         ).fetchall()
     except Exception:
         rows = []
