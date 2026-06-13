@@ -44,6 +44,55 @@ def calc_edge(model_prob: float, fair_prob: float) -> float:
     return model_prob - fair_prob
 
 
+# ── per-book line shopping ──────────────────────────────────────────────────────
+
+def book_odds_breakdown(db_path: str, sport: str, market: str) -> dict:
+    """Latest American price per book for every outcome of a market.
+
+    Returns {(event_id, outcome, point): {bookmaker: price}}, keyed by the bare
+    outcome name (any " (line)" suffix the props feed appends is stripped). Used to
+    attach a full cross-book breakdown to each found edge so the bettor can take the
+    best available price rather than the single reference book the edge was priced on.
+    """
+    import sqlite3
+    from collections import defaultdict
+
+    op = "LIKE" if "%" in market else "="
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT event_id, outcome_name, point, bookmaker, price
+            FROM odds_snapshots
+            WHERE sport = ? AND market {op} ?
+            AND DATE(fetched_at) = DATE('now')
+            ORDER BY fetched_at ASC
+            """,
+            (sport, market),
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
+
+    out: dict = defaultdict(dict)
+    for event_id, outcome_name, point, book, price in rows:
+        outcome = (outcome_name or "").split(" (")[0]
+        out[(str(event_id), outcome, point)][book] = int(price)
+    return out
+
+
+def _attach_books(edge: dict, breakdown: dict, key: tuple) -> dict:
+    """Attach the cross-book price map (and the best price) for an edge's outcome."""
+    books = breakdown.get(key)
+    if books:
+        edge["book_odds"] = dict(books)
+        best_book, best_price = max(books.items(), key=lambda kv: american_to_decimal(kv[1]))
+        edge["best_book"] = best_book
+        edge["best_odds"] = best_price
+    return edge
+
+
 def kelly_stake(edge: float, odds: int, bankroll: float, fraction: float = 0.25) -> float:
     """Fractional Kelly criterion stake in dollars.
 
@@ -179,6 +228,7 @@ def find_moneyline_edges(
     for event_id, outcome_name, price in odds_rows:
         odds_map.setdefault(event_id, {})[outcome_name] = int(price)
 
+    breakdown = book_odds_breakdown(db_path, sport, "h2h")
     edges = []
     for i, row in enumerate(home_df.iter_rows(named=True)):
         model_home_prob = float(home_win_prob[i])
@@ -210,7 +260,7 @@ def find_moneyline_edges(
             (away_team, away_edge, away_book_odds, model_away_prob),
         ]:
             if edge >= min_edge:
-                edges.append({
+                edges.append(_attach_books({
                     "sport":      sport.upper(),
                     "market":     "Moneyline",
                     "game":       f"{away_team} @ {home_team}",
@@ -220,7 +270,7 @@ def find_moneyline_edges(
                     "fair_prob":  round(fair_home if team == home_team else fair_away, 3),
                     "edge":       round(edge, 3),
                     "kelly_stake": round(kelly_stake(edge, odds, bankroll), 2),
-                })
+                }, breakdown, (game_id, team, None)))
 
     return sorted(edges, key=lambda x: x["edge"], reverse=True)
 
@@ -271,6 +321,7 @@ def find_totals_edges(
     for event_id, outcome_name, price, point in odds_rows:
         odds_map.setdefault(event_id, {})[outcome_name] = (int(price), point)
 
+    breakdown = book_odds_breakdown(db_path, sport, "totals")
     edges = []
     for i, row in enumerate(home_df.iter_rows(named=True)):
         pred = float(predicted_totals[i])
@@ -287,7 +338,7 @@ def find_totals_edges(
         for side, odds, model_prob, edge in _over_under_edges(
             pred, sigma, book_total, over_price, under_price, min_edge
         ):
-            edges.append({
+            edges.append(_attach_books({
                 "sport":        sport.upper(),
                 "market":       "Totals",
                 "game":         f"@ {home_team}",
@@ -298,7 +349,7 @@ def find_totals_edges(
                 "book_total":   book_total,
                 "edge":         round(edge, 3),
                 "kelly_stake":  round(kelly_stake(edge, odds, bankroll), 2),
-            })
+            }, breakdown, (game_id, side, book_total)))
 
     return sorted(edges, key=lambda x: x["edge"], reverse=True)
 
@@ -373,6 +424,8 @@ def find_tennis_edges(
     for event_id, home, away, name, price in odds_rows:
         events.setdefault(event_id, {})[name] = int(price)
 
+    breakdown = book_odds_breakdown(db_path, "tennis", "h2h")
+
     def _feature_vector(p1: dict, p2: dict, feature_cols: list[str]) -> np.ndarray:
         vals: dict[str, float] = {}
         for f in _DIFF_FEATURES:
@@ -408,7 +461,7 @@ def find_tennis_edges(
             fair_self, _ = remove_vig(american_to_prob(o1), american_to_prob(o2))
             edge = calc_edge(model_prob, fair_self)
             if edge >= min_edge:
-                edges.append({
+                edges.append(_attach_books({
                     "sport": "TENNIS",
                     "market": "Moneyline",
                     "game": f"{n1} vs {n2}",
@@ -418,7 +471,7 @@ def find_tennis_edges(
                     "fair_prob": round(fair_self, 3),
                     "edge": round(edge, 3),
                     "kelly_stake": round(kelly_stake(edge, o1, bankroll), 2),
-                })
+                }, breakdown, (str(event_id), name, None)))
 
     return sorted(edges, key=lambda x: x["edge"], reverse=True)
 
@@ -492,6 +545,7 @@ def find_prop_edges(
         fc_sigma_col = sub[fc_sigma].to_numpy() if has_fc else None
 
         market_key = f"player_{stat}"
+        breakdown = book_odds_breakdown(db_path, sport, market_key)
 
         for i, row in enumerate(sub.iter_rows(named=True)):
             pred = float(means[i])
@@ -514,7 +568,7 @@ def find_prop_edges(
             for side, odds, model_prob, edge in _over_under_edges(
                 pred, sigma, line, over["price"], under["price"], min_edge
             ):
-                edges.append({
+                edges.append(_attach_books({
                     "sport":       sport.upper(),
                     "market":      f"Props ({stat})",
                     "game":        f"game {game_id}",
@@ -525,6 +579,6 @@ def find_prop_edges(
                     "book_line":   line,
                     "edge":        round(edge, 3),
                     "kelly_stake": round(kelly_stake(edge, odds, bankroll), 2),
-                })
+                }, breakdown, (str(game_id), f"{player} {side}", line)))
 
     return sorted(edges, key=lambda x: x["edge"], reverse=True)

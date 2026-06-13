@@ -205,6 +205,7 @@ def main():
     parser.add_argument("--backtest",       action="store_true", help="Holdout backtest on the 2025-26 season (no ingest, no betting)")
     parser.add_argument("--ingest-history", action="store_true", help="Pull full historical data (first run only)")
     parser.add_argument("--no-odds",        action="store_true", help="Skip odds fetch (use cached)")
+    parser.add_argument("--arb",            action="store_true", help="Also scan stored multi-book odds for cross-book arbitrage")
     parser.add_argument("--compare",        action="store_true", help="Run the tennis model bake-off (cloud tier)")
     parser.add_argument("--export-features", action="store_true", help="Export tennis OBT to parquet for cloud training")
     parser.add_argument("--export-sequences", action="store_true", help="Export player game-log sequences for the cloud prop forecaster")
@@ -268,6 +269,19 @@ def main():
     print_edges(all_edges)
     if all_edges:
         save_edges(all_edges)
+
+    # model-free cross-book arbitrage scan (reads stored odds, no extra API quota)
+    if args.arb:
+        from edge.arbitrage import find_arbitrage
+        from edge.alerts import print_arbs, save_arbs
+        all_arbs = []
+        for sport in sports:
+            print(f"\n[arb] Scanning {sport.upper()} odds for arbitrage...")
+            all_arbs += find_arbitrage(DB_PATH, sport, bankroll=BANKROLL)
+        all_arbs.sort(key=lambda a: a["roi"], reverse=True)
+        print_arbs(all_arbs)
+        if all_arbs:
+            save_arbs(all_arbs)
 
 
 if __name__ == "__main__":
