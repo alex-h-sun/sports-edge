@@ -48,16 +48,33 @@ BOOKMAKERS = "draftkings,fanduel,betmgm,caesars"
 # The Odds API splits tennis by tournament. These are the active ATP/WTA keys;
 # inactive tournaments simply return no events (and cost no quota beyond the call).
 TENNIS_SPORT_KEYS = [
+    # ATP Grand Slams
     "tennis_atp_aus_open_singles", "tennis_atp_french_open", "tennis_atp_wimbledon",
-    "tennis_atp_us_open", "tennis_atp_indian_wells", "tennis_atp_miami_open",
-    "tennis_atp_monte_carlo_masters", "tennis_atp_madrid_open", "tennis_atp_italian_open",
-    "tennis_atp_canadian_open", "tennis_atp_cincinnati_open", "tennis_atp_shanghai_masters",
-    "tennis_atp_paris_masters", "tennis_atp_dubai", "tennis_atp_qatar_open",
+    "tennis_atp_us_open",
+    # ATP 1000 (Masters)
+    "tennis_atp_indian_wells", "tennis_atp_miami_open", "tennis_atp_monte_carlo_masters",
+    "tennis_atp_madrid_open", "tennis_atp_italian_open", "tennis_atp_canadian_open",
+    "tennis_atp_cincinnati_open", "tennis_atp_shanghai_masters", "tennis_atp_paris_masters",
+    # ATP 500
+    "tennis_atp_rotterdam", "tennis_atp_rio_open", "tennis_atp_dubai", "tennis_atp_acapulco",
+    "tennis_atp_barcelona", "tennis_atp_halle", "tennis_atp_queens_club",
+    "tennis_atp_hamburg", "tennis_atp_washington", "tennis_atp_tokyo",
+    "tennis_atp_vienna", "tennis_atp_swiss_indoors",
+    # ATP 250 (selected)
+    "tennis_atp_qatar_open",
+    # WTA Grand Slams
     "tennis_wta_aus_open_singles", "tennis_wta_french_open", "tennis_wta_wimbledon",
-    "tennis_wta_us_open", "tennis_wta_indian_wells", "tennis_wta_miami_open",
-    "tennis_wta_madrid_open", "tennis_wta_italian_open", "tennis_wta_canadian_open",
-    "tennis_wta_cincinnati_open", "tennis_wta_china_open", "tennis_wta_wuhan_open",
-    "tennis_wta_dubai", "tennis_wta_qatar_open", "tennis_wta_queens_club_champ",
+    "tennis_wta_us_open",
+    # WTA 1000
+    "tennis_wta_indian_wells", "tennis_wta_miami_open", "tennis_wta_madrid_open",
+    "tennis_wta_italian_open", "tennis_wta_canadian_open", "tennis_wta_cincinnati_open",
+    "tennis_wta_china_open", "tennis_wta_wuhan_open", "tennis_wta_guadalajara",
+    # WTA 500
+    "tennis_wta_adelaide", "tennis_wta_abu_dhabi", "tennis_wta_dubai", "tennis_wta_qatar_open",
+    "tennis_wta_stuttgart", "tennis_wta_berlin", "tennis_wta_eastbourne",
+    "tennis_wta_washington", "tennis_wta_san_jose", "tennis_wta_seoul", "tennis_wta_linz",
+    # WTA 250 (selected)
+    "tennis_wta_queens_club_champ",
 ]
 
 
