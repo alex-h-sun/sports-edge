@@ -297,8 +297,8 @@ def fetch_tennis_odds(db_path: str, markets: list[str] | None = None) -> None:
                 },
                 timeout=15,
             )
-            if resp.status_code == 422:
-                continue  # tournament not currently offered
+            if resp.status_code in (404, 422):
+                continue  # tournament not currently offered / no upcoming events
             resp.raise_for_status()
         except Exception as e:
             print(f"    warning: {sport_key} failed ({e})")
