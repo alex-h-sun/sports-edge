@@ -394,3 +394,54 @@ with st.expander("📊 Odds API quota"):
             st.info("No quota data yet. Add ODDS_API_KEY to .env and refresh.")
     except Exception:
         st.info("No quota data yet.")
+
+
+# ── bankroll simulator (forward paper-trading equity curve) ─────────────────────
+
+st.divider()
+st.subheader("💰 Bankroll Simulator")
+st.caption(
+    "Forward paper-trading: every live moneyline edge (>=7%) logged automatically on "
+    "each `python run.py` is staked at compounding quarter-Kelly and settled against "
+    "the actual result. The curve is a real (not backtested) P&L that grows as you run "
+    "the pipeline over time."
+)
+
+try:
+    from models.paper_sim import (
+        load_ledger, settle_ledger, equity_summary, START_BANKROLL,
+    )
+
+    _start = BANKROLL or START_BANKROLL
+    _rows = settle_ledger(load_ledger(), DB_PATH, start=_start)
+    if not _rows:
+        st.info(
+            "No paper-trading bets yet. Run `python run.py --paper` on a day with "
+            "moneyline edges to start the ledger."
+        )
+    else:
+        s = equity_summary(_rows, _start)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Balance", f"${s['current']:,.2f}", f"{s['total_return_pct']:+.2f}%")
+        c2.metric("Hit rate", f"{s['hit_rate']*100:.1f}%", f"{s['n_settled']} settled")
+        c3.metric("Max drawdown", f"{s['max_drawdown_pct']:.1f}%")
+        c4.metric("Open / void", f"{s['n_open']} / {s['n_void']}")
+
+        ledger = pl.DataFrame(_rows)
+        settled = ledger.filter(pl.col("status").is_in(["won", "lost"]))
+        if not settled.is_empty():
+            curve = (
+                settled.sort("game_date")
+                .select(["game_date", "balance"])
+                .to_pandas()
+                .set_index("game_date")
+            )
+            st.line_chart(curve, y="balance")
+
+        st.dataframe(
+            ledger.sort("placed_date", descending=True).to_pandas(),
+            use_container_width=True,
+            hide_index=True,
+        )
+except Exception as e:
+    st.info(f"Bankroll simulator unavailable: {e}")
