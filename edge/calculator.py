@@ -66,6 +66,7 @@ def book_odds_breakdown(db_path: str, sport: str, market: str) -> dict:
             FROM odds_snapshots
             WHERE sport = ? AND market {op} ?
             AND DATE(fetched_at) = DATE('now')
+            AND datetime(commence_time) > datetime('now')
             ORDER BY fetched_at ASC
             """,
             (sport, market),
@@ -241,6 +242,7 @@ def find_moneyline_edges(
             FROM odds_snapshots
             WHERE sport = ? AND market = 'h2h' AND bookmaker = 'draftkings'
             AND DATE(fetched_at) = DATE('now')
+            AND datetime(commence_time) > datetime('now')
             ORDER BY fetched_at DESC
         """, (sport,)).fetchall()
     except Exception:
@@ -335,6 +337,7 @@ def find_totals_edges(
             FROM odds_snapshots
             WHERE sport = ? AND market = 'totals' AND bookmaker = 'draftkings'
             AND DATE(fetched_at) = DATE('now')
+            AND datetime(commence_time) > datetime('now')
             ORDER BY fetched_at DESC
         """, (sport,)).fetchall()
     except Exception:
@@ -472,6 +475,7 @@ def find_tennis_edges(
             FROM odds_snapshots
             WHERE sport = 'tennis' AND market = 'h2h' AND bookmaker = 'draftkings'
             AND DATE(fetched_at) = DATE('now')
+            AND datetime(commence_time) > datetime('now')
             ORDER BY fetched_at DESC
         """).fetchall()
     except Exception:
@@ -556,6 +560,7 @@ def find_prop_edges(
             FROM odds_snapshots
             WHERE sport = ? AND market LIKE 'player_%' AND bookmaker = 'draftkings'
             AND DATE(fetched_at) = DATE('now')
+            AND datetime(commence_time) > datetime('now')
             ORDER BY fetched_at DESC
         """, (sport,)).fetchall()
     except Exception:
