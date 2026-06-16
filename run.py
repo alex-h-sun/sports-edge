@@ -266,6 +266,7 @@ def main():
     # On by default: every normal run settles finished bets and logs new >=5% edges.
     parser.add_argument("--no-paper",     action="store_true", help="Skip the paper-trading ledger update for this run")
     parser.add_argument("--sim-status",   action="store_true", help="Print the paper-trading bankroll summary and exit (no ingest/betting)")
+    parser.add_argument("--sim-history",  action="store_true", help="Print every bet the paper sim has made and exit (no ingest/betting)")
     parser.add_argument("--sim-min-edge", type=float, default=None, help="Min edge to log in the paper sim (default 0.07)")
     parser.add_argument("--sim-bankroll", type=float, default=None, help="Starting bankroll for the paper sim (default env BANKROLL)")
     args = parser.parse_args()
@@ -295,6 +296,15 @@ def main():
         rows = settle_ledger(load_ledger(), DB_PATH, start=start)
         save_ledger(rows)
         print_summary(rows, start)
+        return
+
+    # paper-sim full history only: settle finished bets, then list every bet made.
+    if args.sim_history:
+        from models.paper_sim import load_ledger, settle_ledger, save_ledger, print_history
+        start = args.sim_bankroll if args.sim_bankroll is not None else BANKROLL
+        rows = settle_ledger(load_ledger(), DB_PATH, start=start)
+        save_ledger(rows)
+        print_history(rows, start)
         return
 
     # manual matchup edge: model vs a price you type in. No ingest/odds/training.
