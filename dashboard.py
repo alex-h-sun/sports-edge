@@ -248,6 +248,135 @@ else:
     st.info("No injury data loaded yet. Click 🔄 Refresh data.")
 
 
+# ── manual edge calculator ──────────────────────────────────────────────────────
+
+st.divider()
+st.subheader("🎯 Manual Edge Calculator")
+st.caption(
+    "Pick a matchup and type the book's current odds to get the model's edge + Kelly "
+    "stake for that exact bet. Evaluates a neutral, current-form matchup (no injuries, "
+    "default rest, surface proxied unless set) — good for 'is this price +EV right now'."
+)
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading names...")
+def _manual_names(kind: str, sport: str | None = None) -> list[str]:
+    from edge import manual
+    try:
+        if kind == "tennis":
+            return manual.list_tennis_players(DB_PATH)
+        if kind == "team":
+            return manual.list_teams(DB_PATH, sport)
+        return manual.list_players(DB_PATH, sport)
+    except Exception:
+        return []
+
+
+def _odds_input(col, label: str, default: int = -110):
+    return int(col.number_input(label, min_value=-2000, max_value=2000, value=default, step=5))
+
+
+mc1, mc2 = st.columns(2)
+m_sport = mc1.selectbox("Sport", ["Tennis", "NBA", "NHL"], key="m_sport")
+_markets = ["Moneyline", "Totals", "Spread"] + (["Prop"] if m_sport == "NBA" else [])
+m_market = mc2.selectbox("Market", _markets, key="m_market")
+_sport_key = {"Tennis": "tennis", "NBA": "nba", "NHL": "nhl"}[m_sport]
+_is_tennis = m_sport == "Tennis"
+_entity = "Player" if _is_tennis else "Team"
+
+manual_edges: list[dict] = []
+manual_error: str | None = None
+
+if m_market == "Prop":
+    from models.train import PROP_STATS
+    players = _manual_names("player", _sport_key)
+    pc1, pc2 = st.columns(2)
+    sel_player = pc1.selectbox("Player", players, key="m_player") if players else None
+    sel_stat = pc2.selectbox("Stat", PROP_STATS.get(_sport_key, []), key="m_stat")
+    lc1, lc2, lc3 = st.columns(3)
+    prop_line = float(lc1.number_input("Line", value=20.5, step=0.5, key="m_prop_line"))
+    over_odds = _odds_input(lc2, "Over odds")
+    under_odds = _odds_input(lc3, "Under odds")
+    if st.button("Calculate edge", type="primary", key="m_go_prop") and sel_player:
+        from edge.manual import player_prop_edge
+        try:
+            manual_edges = player_prop_edge(
+                DB_PATH, _sport_key, sel_player, sel_stat, prop_line,
+                over_odds, under_odds, bankroll=BANKROLL,
+            )
+        except Exception as e:
+            manual_error = str(e)
+else:
+    names = _manual_names("tennis") if _is_tennis else _manual_names("team", _sport_key)
+    ec1, ec2 = st.columns(2)
+    label_a = f"{_entity} A" + (" (player 1)" if _is_tennis else " (home)")
+    label_b = f"{_entity} B" + (" (player 2)" if _is_tennis else " (away)")
+    side_a = ec1.selectbox(label_a, names, key="m_a") if names else None
+    side_b = ec2.selectbox(label_b, names, index=min(1, len(names) - 1), key="m_b") if names else None
+
+    surface = None
+    if _is_tennis:
+        s = st.selectbox("Surface (optional)", ["(proxy from last match)", "hard", "clay", "grass", "carpet"], key="m_surf")
+        surface = None if s.startswith("(") else s
+
+    if m_market == "Totals":
+        lc1, lc2, lc3 = st.columns(3)
+        line = float(lc1.number_input("Total line", value=(22.5 if _is_tennis else 220.5), step=0.5, key="m_tot_line"))
+        over_odds = _odds_input(lc2, "Over odds")
+        under_odds = _odds_input(lc3, "Under odds")
+    elif m_market == "Spread":
+        lc1, lc2, lc3 = st.columns(3)
+        line = float(lc1.number_input(f"{_entity} A handicap", value=(-3.5 if _is_tennis else -5.5), step=0.5, key="m_spr_line"))
+        odds_a = _odds_input(lc2, f"{_entity} A odds")
+        odds_b = _odds_input(lc3, f"{_entity} B odds")
+    else:  # Moneyline
+        lc1, lc2 = st.columns(2)
+        odds_a = _odds_input(lc1, f"{_entity} A odds", default=-150)
+        odds_b = _odds_input(lc2, f"{_entity} B odds", default=130)
+
+    if st.button("Calculate edge", type="primary", key="m_go") and side_a and side_b:
+        from edge.manual import tennis_matchup_edge, team_matchup_edge
+        kw = dict(bankroll=BANKROLL)
+        if m_market == "Totals":
+            kw.update(line=line, over_odds=over_odds, under_odds=under_odds)
+        elif m_market == "Spread":
+            kw.update(line=line, odds_a=odds_a, odds_b=odds_b)
+        else:
+            kw.update(odds_a=odds_a, odds_b=odds_b)
+        try:
+            if _is_tennis:
+                manual_edges = tennis_matchup_edge(DB_PATH, side_a, side_b, m_market.lower(), surface=surface, **kw)
+            else:
+                manual_edges = team_matchup_edge(DB_PATH, _sport_key, side_a, side_b, m_market.lower(), **kw)
+        except Exception as e:
+            manual_error = str(e)
+
+if manual_error:
+    st.error(manual_error)
+elif manual_edges:
+    rows = []
+    for e in manual_edges:
+        if "fair_prob" in e:
+            detail = f"Model {e['model_prob']*100:.1f}% vs fair {e['fair_prob']*100:.1f}%"
+        elif "model_total" in e:
+            detail = f"Model total {e['model_total']} vs line {e['book_total']}"
+        else:
+            detail = f"Model {e['model_pred']} vs line {e['book_line']}"
+        rows.append({
+            "Bet": e["bet"],
+            "Odds": f"+{e['odds']}" if e["odds"] > 0 else str(e["odds"]),
+            "Edge": f"{e['edge']*100:+.1f}%",
+            "Kelly $": f"${e['kelly_stake']:.2f}",
+            "Detail": detail,
+        })
+    best = max(manual_edges, key=lambda x: x["edge"])
+    if best["edge"] > 0:
+        st.success(f"✅ Best +EV side: **{best['bet']}** — edge {best['edge']*100:+.1f}%, Kelly ${best['kelly_stake']:.2f}")
+    else:
+        st.warning("No +EV side at these prices — both sides are -EV vs the model.")
+    st.dataframe(pl.DataFrame(rows).to_pandas(), use_container_width=True, hide_index=True)
+
+
 # ── quota tracker ─────────────────────────────────────────────────────────────
 
 with st.expander("📊 Odds API quota"):

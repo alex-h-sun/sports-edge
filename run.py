@@ -91,6 +91,44 @@ def backtest(sport: str) -> None:
     train_all(sport, DB_PATH, holdout_start=cutoff)
 
 
+def run_matchup(args) -> None:
+    """Manual edge for a single hand-picked matchup priced against odds you supply."""
+    from edge.manual import tennis_matchup_edge, team_matchup_edge, player_prop_edge
+    from edge.alerts import print_edges
+
+    sport = args.sport
+    if sport not in ("nba", "nhl", "tennis"):
+        print("  --matchup needs a single --sport (nba, nhl, or tennis).")
+        return
+
+    market = (args.market or "moneyline").lower()
+    try:
+        if market in ("prop", "props") or args.player:
+            edges = player_prop_edge(
+                DB_PATH, sport, args.player, args.stat, args.line,
+                args.odds_over, args.odds_under, bankroll=BANKROLL,
+            )
+        elif sport == "tennis":
+            edges = tennis_matchup_edge(
+                DB_PATH, args.a, args.b, market,
+                odds_a=args.odds_a, odds_b=args.odds_b, line=args.line,
+                over_odds=args.odds_over, under_odds=args.odds_under,
+                surface=args.surface, bankroll=BANKROLL,
+            )
+        else:
+            edges = team_matchup_edge(
+                DB_PATH, sport, args.a, args.b, market,
+                odds_a=args.odds_a, odds_b=args.odds_b, line=args.line,
+                over_odds=args.odds_over, under_odds=args.odds_under,
+                rest_days=args.rest_days, bankroll=BANKROLL,
+            )
+    except (ValueError, FileNotFoundError, TypeError) as e:
+        print(f"  {e}")
+        return
+
+    print_edges(edges)
+
+
 def find_edges(sport: str) -> list[dict]:
     print(f"\n[edge] Finding edges for {sport.upper()}...")
 
@@ -210,6 +248,20 @@ def main():
     parser.add_argument("--export-features", action="store_true", help="Export tennis OBT to parquet for cloud training")
     parser.add_argument("--export-sequences", action="store_true", help="Export player game-log sequences for the cloud prop forecaster")
     parser.add_argument("--import-models",  action="store_true", help="Import cloud-trained artifacts locally")
+    # manual matchup edge calculator (no ingest/odds/training — pure model vs your price)
+    parser.add_argument("--matchup",  action="store_true", help="Manual edge for a hand-picked matchup + your odds (needs a single --sport)")
+    parser.add_argument("--a", "--home", dest="a", help="Side A: player1 (tennis) or home team")
+    parser.add_argument("--b", "--away", dest="b", help="Side B: player2 (tennis) or away team")
+    parser.add_argument("--player", help="Player for a prop bet (NBA)")
+    parser.add_argument("--market", default="moneyline", help="moneyline | totals | spread | prop")
+    parser.add_argument("--stat", help="Prop stat, e.g. pts/reb/ast (with --market prop)")
+    parser.add_argument("--line", type=float, help="Line: total, spread handicap, or prop line")
+    parser.add_argument("--odds-a", type=int, help="American odds for side A (moneyline/spread)")
+    parser.add_argument("--odds-b", type=int, help="American odds for side B (moneyline/spread)")
+    parser.add_argument("--odds-over", type=int, help="American odds for Over (totals/prop)")
+    parser.add_argument("--odds-under", type=int, help="American odds for Under (totals/prop)")
+    parser.add_argument("--surface", help="Tennis surface override: hard|clay|grass|carpet")
+    parser.add_argument("--rest-days", type=float, default=2.0, help="Team matchup rest-days assumption (default 2)")
     args = parser.parse_args()
 
     if args.sport == "both":
@@ -228,6 +280,11 @@ def main():
     if args.backtest:
         for sport in sports:
             backtest(sport)
+        return
+
+    # manual matchup edge: model vs a price you type in. No ingest/odds/training.
+    if args.matchup:
+        run_matchup(args)
         return
 
     # arbitrage-only run: pure cross-book scan on right-now odds. No model edges,
