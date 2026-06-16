@@ -45,37 +45,11 @@ NHL_PROP_KEYS = [
 # Bookmakers to request (free tier supports all of these)
 BOOKMAKERS = "draftkings,fanduel,betmgm,caesars"
 
-# The Odds API splits tennis by tournament. These are the active ATP/WTA keys;
-# inactive tournaments simply return no events (and cost no quota beyond the call).
-TENNIS_SPORT_KEYS = [
-    # ATP Grand Slams
-    "tennis_atp_aus_open_singles", "tennis_atp_french_open", "tennis_atp_wimbledon",
-    "tennis_atp_us_open",
-    # ATP 1000 (Masters)
-    "tennis_atp_indian_wells", "tennis_atp_miami_open", "tennis_atp_monte_carlo_masters",
-    "tennis_atp_madrid_open", "tennis_atp_italian_open", "tennis_atp_canadian_open",
-    "tennis_atp_cincinnati_open", "tennis_atp_shanghai_masters", "tennis_atp_paris_masters",
-    # ATP 500
-    "tennis_atp_rotterdam", "tennis_atp_rio_open", "tennis_atp_dubai", "tennis_atp_acapulco",
-    "tennis_atp_barcelona", "tennis_atp_halle", "tennis_atp_queens_club",
-    "tennis_atp_hamburg", "tennis_atp_washington", "tennis_atp_tokyo",
-    "tennis_atp_vienna", "tennis_atp_swiss_indoors",
-    # ATP 250 (selected)
-    "tennis_atp_qatar_open",
-    # WTA Grand Slams
-    "tennis_wta_aus_open_singles", "tennis_wta_french_open", "tennis_wta_wimbledon",
-    "tennis_wta_us_open",
-    # WTA 1000
-    "tennis_wta_indian_wells", "tennis_wta_miami_open", "tennis_wta_madrid_open",
-    "tennis_wta_italian_open", "tennis_wta_canadian_open", "tennis_wta_cincinnati_open",
-    "tennis_wta_china_open", "tennis_wta_wuhan_open", "tennis_wta_guadalajara",
-    # WTA 500
-    "tennis_wta_adelaide", "tennis_wta_abu_dhabi", "tennis_wta_dubai", "tennis_wta_qatar_open",
-    "tennis_wta_stuttgart", "tennis_wta_berlin", "tennis_wta_eastbourne",
-    "tennis_wta_washington", "tennis_wta_san_jose", "tennis_wta_seoul", "tennis_wta_linz",
-    # WTA 250 (selected)
-    "tennis_wta_queens_club_champ",
-]
+# The Odds API splits tennis by tournament, and the per-tournament keys change as
+# events come in/out of season (and are named inconsistently). Rather than hardcode
+# a list that goes stale, we discover the currently active tennis keys at runtime via
+# the free /sports endpoint (see _active_tennis_keys).
+_TENNIS_KEY_PREFIXES = ("tennis_atp_", "tennis_wta_")
 
 
 def _get_api_key() -> str:
@@ -268,11 +242,25 @@ def fetch_props(sport: str, db_path: str) -> None:
     conn.close()
 
 
+def _active_tennis_keys(api_key: str) -> list[str]:
+    """Return the currently in-season tennis tournament keys.
+
+    Uses the free /sports endpoint (does not count against the odds quota), so we
+    only request odds for tournaments that actually exist right now — no stale
+    hardcoded keys, no 404s, and newly added tournaments are picked up automatically.
+    """
+    resp = requests.get(f"{_BASE}/sports/", params={"apiKey": api_key}, timeout=15)
+    resp.raise_for_status()
+    return [s["key"] for s in resp.json()
+            if s.get("active") and s["key"].startswith(_TENNIS_KEY_PREFIXES)]
+
+
 def fetch_tennis_odds(db_path: str, markets: list[str] | None = None) -> None:
     """Pull current tennis odds across all active tournament keys.
 
     Writes rows with sport='tennis' into the shared odds_snapshots table. The Odds
-    API exposes tennis per-tournament, so we loop the keys; inactive ones return [].
+    API exposes tennis per-tournament, so we discover the active keys at runtime and
+    loop them.
     """
     api_key = _get_api_key()
     markets = markets or ["moneyline", "spread", "totals"]
@@ -284,7 +272,13 @@ def fetch_tennis_odds(db_path: str, markets: list[str] | None = None) -> None:
     fetched_at = datetime.now(timezone.utc).isoformat()
     total_events = total_rows = 0
 
-    for sport_key in TENNIS_SPORT_KEYS:
+    tennis_keys = _active_tennis_keys(api_key)
+    if not tennis_keys:
+        print("  No active tennis tournaments on the feed right now")
+        conn.close()
+        return
+
+    for sport_key in tennis_keys:
         try:
             resp = requests.get(
                 f"{_BASE}/sports/{sport_key}/odds",
