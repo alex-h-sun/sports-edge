@@ -176,6 +176,34 @@ def _over_under_edges(
     return out
 
 
+def _spread_edges(
+    mean: float, sigma: float, line: float,
+    a_odds: int, b_odds: int, min_edge: float,
+    a_label: str = "Home", b_label: str = "Away",
+) -> list[tuple[str, int, float, float]]:
+    """Price a point spread / handicap as a normal predictive distribution.
+
+    `mean` is the model's predicted margin from side A's perspective (e.g. home
+    points minus away points, or tennis player1 game margin). `line` is side A's
+    handicap as written on the book (e.g. -6.5 if A is favoured by 6.5): A covers
+    when margin + line > 0, i.e. margin > -line. Returns [(side, odds, model_prob,
+    edge)] for sides whose edge >= min_edge, with edge = model P(cover) - the book's
+    vig-free P(cover). Pushes are ignored (treated as the complement split).
+    """
+    p_a = float(1.0 - norm.cdf((-line - mean) / sigma))
+    p_b = 1.0 - p_a
+    fair_a, fair_b = remove_vig(american_to_prob(a_odds), american_to_prob(b_odds))
+    out = []
+    for label, odds, mp, fp in (
+        (a_label, a_odds, p_a, fair_a),
+        (b_label, b_odds, p_b, fair_b),
+    ):
+        edge = mp - fp
+        if edge >= min_edge:
+            out.append((label, odds, mp, edge))
+    return out
+
+
 # ── edge finding ──────────────────────────────────────────────────────────────
 
 def find_moneyline_edges(
@@ -354,6 +382,57 @@ def find_totals_edges(
     return sorted(edges, key=lambda x: x["edge"], reverse=True)
 
 
+def tennis_player_snapshots(db_path: str) -> dict[str, dict]:
+    """Latest per-player feature snapshot, indexed by player name.
+
+    One row per player (their most recent match), built from the same feature
+    pipeline the tennis models train on. Shared by find_tennis_edges (auto) and the
+    manual matchup calculator so both price off identical inputs.
+    """
+    from features.pipeline import build_tennis_player_features
+
+    pf = build_tennis_player_features(db_path)
+    if pf.is_empty():
+        return {}
+    latest = (
+        pf.sort(["player_id", "seq_date"])
+          .group_by("player_id")
+          .last()
+    )
+    snap: dict[str, dict] = {}
+    for row in latest.iter_rows(named=True):
+        name = (row.get("player_name") or "").strip()
+        if name:
+            snap[name] = row
+    return snap
+
+
+def tennis_feature_vector(
+    p1: dict, p2: dict, feature_cols: list[str], surface: str | None = None
+) -> np.ndarray:
+    """Build the model feature row for a player1-vs-player2 matchup.
+
+    Diff features are player1 minus player2; context is taken from player1's most
+    recent match. If `surface` (hard/clay/grass/carpet) is given it overrides the
+    surface one-hot context, since odds feeds do not expose the court surface.
+    """
+    from features.pipeline import _DIFF_FEATURES, _CONTEXT_FEATURES, TENNIS_SURFACES
+
+    vals: dict[str, float] = {}
+    for f in _DIFF_FEATURES:
+        a, b = p1.get(f), p2.get(f)
+        vals[f"{f}_diff"] = (float(a) - float(b)) if a is not None and b is not None else np.nan
+    # context proxied from player1's latest match
+    for c in _CONTEXT_FEATURES:
+        v = p1.get(c)
+        vals[c] = float(v) if v is not None else np.nan
+    if surface:
+        s = surface.strip().lower()
+        for name in TENNIS_SURFACES:
+            vals[f"surface_{name.lower()}"] = 1.0 if name.lower() == s else 0.0
+    return np.array([vals.get(c, np.nan) for c in feature_cols], dtype=np.float32)
+
+
 def find_tennis_edges(
     db_path: str,
     min_edge: float = 0.03,
@@ -368,9 +447,6 @@ def find_tennis_edges(
     is by name, mirroring the NBA/NHL edge functions.
     """
     import sqlite3
-    from features.pipeline import (
-        build_tennis_player_features, _DIFF_FEATURES, _CONTEXT_FEATURES,
-    )
 
     # ATP and WTA have separate models; load lazily per matchup and cache.
     model_cache: dict[str, dict] = {}
@@ -384,22 +460,9 @@ def find_tennis_edges(
                 model_cache[tour] = None
         return model_cache[tour]
 
-    pf = build_tennis_player_features(db_path)
-    if pf.is_empty():
+    snap = tennis_player_snapshots(db_path)
+    if not snap:
         return []
-
-    # latest snapshot per player (most recent match)
-    latest = (
-        pf.sort(["player_id", "seq_date"])
-          .group_by("player_id")
-          .last()
-    )
-    # index by normalized player name
-    snap: dict[str, dict] = {}
-    for row in latest.iter_rows(named=True):
-        name = (row.get("player_name") or "").strip()
-        if name:
-            snap[name] = row
 
     # pull today's tennis h2h odds
     conn = sqlite3.connect(db_path)
@@ -426,17 +489,6 @@ def find_tennis_edges(
 
     breakdown = book_odds_breakdown(db_path, "tennis", "h2h")
 
-    def _feature_vector(p1: dict, p2: dict, feature_cols: list[str]) -> np.ndarray:
-        vals: dict[str, float] = {}
-        for f in _DIFF_FEATURES:
-            a, b = p1.get(f), p2.get(f)
-            vals[f"{f}_diff"] = (float(a) - float(b)) if a is not None and b is not None else np.nan
-        # context proxied from player1's latest match
-        for c in _CONTEXT_FEATURES:
-            v = p1.get(c)
-            vals[c] = float(v) if v is not None else np.nan
-        return np.array([vals.get(c, np.nan) for c in feature_cols], dtype=np.float32)
-
     edges: list[dict] = []
     for event_id, book in events.items():
         if len(book) < 2:
@@ -453,7 +505,7 @@ def find_tennis_edges(
             continue
         feature_cols = artifact["feature_cols"]
 
-        X = _feature_vector(snap[n1], snap[n2], feature_cols).reshape(1, -1)
+        X = tennis_feature_vector(snap[n1], snap[n2], feature_cols).reshape(1, -1)
         p1_win = float(_predict_proba(artifact, X)[0])
 
         for name, model_prob, other in [(n1, p1_win, n2), (n2, 1 - p1_win, n1)]:
