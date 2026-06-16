@@ -2,7 +2,8 @@
 
 A persistent CSV ledger that turns the live edges found on each ``python run.py``
 into a running, compounding equity curve — "if we'd started with $1000 and bet
-every >=5% edge, how much would we have now?".
+every >=5% edge, how much would we have now?". Logging runs by default on every
+edge-finding run (opt out with ``--no-paper``).
 
 Why forward-only (not a historical backtest): ``odds_snapshots`` stores only
 recent *live* odds, so there are no per-game closing prices for past seasons to

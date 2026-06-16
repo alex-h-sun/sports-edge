@@ -262,8 +262,9 @@ def main():
     parser.add_argument("--odds-under", type=int, help="American odds for Under (totals/prop)")
     parser.add_argument("--surface", help="Tennis surface override: hard|clay|grass|carpet")
     parser.add_argument("--rest-days", type=float, default=2.0, help="Team matchup rest-days assumption (default 2)")
-    # paper-trading bankroll simulator (forward equity curve over real live edges)
-    parser.add_argument("--paper",        action="store_true", help="Log this run's moneyline edges to the paper-trading ledger and settle finished bets")
+    # paper-trading bankroll simulator (forward equity curve over real live edges).
+    # On by default: every normal run settles finished bets and logs new >=5% edges.
+    parser.add_argument("--no-paper",     action="store_true", help="Skip the paper-trading ledger update for this run")
     parser.add_argument("--sim-status",   action="store_true", help="Print the paper-trading bankroll summary and exit (no ingest/betting)")
     parser.add_argument("--sim-min-edge", type=float, default=None, help="Min edge to log in the paper sim (default 0.05)")
     parser.add_argument("--sim-bankroll", type=float, default=None, help="Starting bankroll for the paper sim (default env BANKROLL)")
@@ -364,7 +365,8 @@ def main():
 
     # paper-trading ledger: settle finished bets off the running balance, then log
     # today's qualifying moneyline edges as new open positions (compounding Kelly).
-    if args.paper:
+    # Runs by default on every edge-finding run; opt out with --no-paper.
+    if not args.no_paper:
         from models.paper_sim import (
             load_ledger, settle_ledger, append_edges, save_ledger,
             current_bankroll, print_summary, SIM_MIN_EDGE,
