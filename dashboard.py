@@ -401,10 +401,10 @@ with st.expander("📊 Odds API quota"):
 st.divider()
 st.subheader("💰 Bankroll Simulator")
 st.caption(
-    "Forward paper-trading: every live moneyline edge logged by `python run.py "
-    "--paper` is staked at compounding quarter-Kelly and settled against the actual "
-    "result. The curve is a real (not backtested) P&L that grows as you run the "
-    "pipeline over time."
+    "Forward paper-trading: every live moneyline edge (>=5%) logged automatically on "
+    "each `python run.py` is staked at compounding quarter-Kelly and settled against "
+    "the actual result. The curve is a real (not backtested) P&L that grows as you run "
+    "the pipeline over time."
 )
 
 try:
