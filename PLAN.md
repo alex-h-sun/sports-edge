@@ -81,6 +81,20 @@ One model per market. All trained with LightGBM, cross-validated on historical s
 - [x] `run.py` — top-level script: ingest recent games → build features → load models → find edges → print/save alerts
 - [ ] Schedule via cron or launchd for daily pre-game runs
 
+### Phase 6 — Paper-Trading Simulator
+- [x] `models/paper_sim.py` — forward paper-trading equity curve. Runs by default on every
+  `run.py` (opt out `--no-paper`): settles previously-open bets against the game-log tables,
+  then logs new moneyline edges (≥ `SIM_MIN_EDGE`, default 7%) as open positions.
+- Staking: flat quarter-Kelly off a **fixed $1000 bankroll** (stake size constant as the
+  curve moves); idempotent re-runs via sha1 `bet_id` dedupe; stale unmatched bets voided
+  after `STALE_DAYS` (5).
+- Forward-only by design: `odds_snapshots` stores no historical odds, so an honest P&L can
+  only accrue from live edges going forward (a backtest would need synthetic odds).
+- Surfaces: `--sim-status` (summary + open bets), `--sim-history` (full bet log), and a
+  "Bankroll Simulator" section in `dashboard.py`. Ledger persisted to `data/sims/paper_ledger.csv`.
+- v1 settles **moneyline only** (team/player win-loss maps onto the game logs); totals/props
+  settlement is the documented next step.
+
 ---
 
 ## Data Schema (SQLite)

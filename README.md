@@ -61,6 +61,30 @@ python run.py --no-odds        # skip odds fetch, use cached (no book comparison
 streamlit run dashboard.py
 ```
 
+The dashboard includes a **Bankroll Simulator** section that renders the paper-trading
+equity curve, headline stats, and full bet ledger.
+
+### Bankroll simulator (forward paper-trading)
+
+Every normal `python run.py` also runs a forward paper-trading ledger: it settles any
+previously-open bets against the actual game results, then logs new moneyline edges
+(≥ 7% by default) as open positions. Starting from a fixed $1000 bankroll, each bet is
+staked flat quarter-Kelly, and a running equity curve is persisted to
+`data/sims/paper_ledger.csv`.
+
+```bash
+python run.py                  # paper-trading runs automatically (on by default)
+python run.py --no-paper       # skip the ledger update for this run
+python run.py --sim-status     # print the bankroll summary + open bets (no ingest/betting)
+python run.py --sim-history    # print every bet the sim has made (no ingest/betting)
+python run.py --sim-min-edge 0.05   # override the logging threshold (default 0.07)
+```
+
+It is **forward-only** (not a historical backtest): the free Odds API tier stores only
+live odds with no per-game history to replay, so an honest P&L can only accrue from real
+live edges going forward. The curve starts empty and grows as you run the pipeline over
+time. v1 settles **moneyline only**; stale unmatchable bets are voided after 5 days.
+
 ### Cron (daily pre-game)
 
 ```cron
@@ -260,13 +284,15 @@ sports-edge/
 ├── models/
 │   ├── train.py            # train + serialize all models
 │   ├── evaluate.py         # AUC / Brier / MAE / RMSE + ROI backtest
+│   ├── paper_sim.py        # forward paper-trading bankroll ledger
 │   └── artifacts/          # .pkl model files (gitignored)
 ├── edge/
 │   ├── calculator.py       # odds math + Kelly stake
 │   └── alerts.py           # stdout + CSV output
 ├── data/
 │   ├── sports.db           # SQLite database (gitignored)
-│   └── edges/              # dated CSV alert files
+│   ├── edges/              # dated CSV alert files
+│   └── sims/               # paper_ledger.csv equity curve (gitignored)
 └── notebooks/              # exploratory analysis
 ```
 
