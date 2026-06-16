@@ -262,6 +262,11 @@ def main():
     parser.add_argument("--odds-under", type=int, help="American odds for Under (totals/prop)")
     parser.add_argument("--surface", help="Tennis surface override: hard|clay|grass|carpet")
     parser.add_argument("--rest-days", type=float, default=2.0, help="Team matchup rest-days assumption (default 2)")
+    # paper-trading bankroll simulator (forward equity curve over real live edges)
+    parser.add_argument("--paper",        action="store_true", help="Log this run's moneyline edges to the paper-trading ledger and settle finished bets")
+    parser.add_argument("--sim-status",   action="store_true", help="Print the paper-trading bankroll summary and exit (no ingest/betting)")
+    parser.add_argument("--sim-min-edge", type=float, default=None, help="Min edge to log in the paper sim (default 0.05)")
+    parser.add_argument("--sim-bankroll", type=float, default=None, help="Starting bankroll for the paper sim (default env BANKROLL)")
     args = parser.parse_args()
 
     if args.sport == "both":
@@ -280,6 +285,15 @@ def main():
     if args.backtest:
         for sport in sports:
             backtest(sport)
+        return
+
+    # paper-sim status only: read the ledger, settle finished bets, print the curve.
+    if args.sim_status:
+        from models.paper_sim import load_ledger, settle_ledger, save_ledger, print_summary
+        start = args.sim_bankroll if args.sim_bankroll is not None else BANKROLL
+        rows = settle_ledger(load_ledger(), DB_PATH, start=start)
+        save_ledger(rows)
+        print_summary(rows, start)
         return
 
     # manual matchup edge: model vs a price you type in. No ingest/odds/training.
@@ -347,6 +361,21 @@ def main():
     print_edges(all_edges)
     if all_edges:
         save_edges(all_edges)
+
+    # paper-trading ledger: settle finished bets off the running balance, then log
+    # today's qualifying moneyline edges as new open positions (compounding Kelly).
+    if args.paper:
+        from models.paper_sim import (
+            load_ledger, settle_ledger, append_edges, save_ledger,
+            current_bankroll, print_summary, SIM_MIN_EDGE,
+        )
+        start = args.sim_bankroll if args.sim_bankroll is not None else BANKROLL
+        min_edge = args.sim_min_edge if args.sim_min_edge is not None else SIM_MIN_EDGE
+        rows = settle_ledger(load_ledger(), DB_PATH, start=start)
+        rows = append_edges(rows, all_edges, current_bankroll(rows, start),
+                            min_edge=min_edge, start=start)
+        save_ledger(rows)
+        print_summary(rows, start)
 
 
 if __name__ == "__main__":

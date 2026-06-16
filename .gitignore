@@ -6,6 +6,7 @@ data/*.db-wal
 data/*.csv
 data/edges/
 data/exports/
+data/sims/
 logs/
 *.egg-info/
 __pycache__/
