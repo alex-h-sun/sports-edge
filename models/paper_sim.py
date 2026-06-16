@@ -391,3 +391,43 @@ def print_summary(rows: list[dict], start: float = START_BANKROLL) -> None:
             print(f"    placed {r['placed_date']}  {r['sport']:<6} {r['selection']:<24} "
                   f"@{int(r['odds']):+d}  ${r['stake']:.2f} -> +${payout:.2f} if win")
     print(f"{'='*70}\n")
+
+
+def print_history(rows: list[dict], start: float = START_BANKROLL) -> None:
+    """Print every bet the simulator has ever made, oldest first."""
+    if not rows:
+        print("\n  No bets logged yet. Run the pipeline to start the paper sim.\n")
+        return
+
+    def _key(r: dict):
+        return (
+            r.get("game_date") or r.get("placed_date") or "",
+            r.get("placed_date") or "",
+            r.get("bet_id") or "",
+        )
+
+    ordered = sorted(rows, key=_key)
+    print(f"\n{'='*78}")
+    print(f"  PAPER SIM — FULL BET HISTORY  ({len(ordered)} bets)")
+    print(f"{'='*78}")
+    print(f"  {'placed':<10} {'game':<10} {'sport':<6} {'selection':<24} "
+          f"{'odds':>6} {'stake':>8} {'result':>9} {'bal':>9}")
+    print(f"  {'-'*76}")
+    for r in ordered:
+        status = (r.get("status") or "open").lower()
+        if status == "won":
+            result = f"+${(r.get('profit') or 0.0):.2f}"
+        elif status == "lost":
+            result = f"-${abs(r.get('profit') or 0.0):.2f}"
+        elif status == "void":
+            result = "void"
+        else:
+            result = "open"
+        bal = r.get("balance")
+        bal_s = f"${bal:.2f}" if isinstance(bal, (int, float)) else "-"
+        odds = r.get("odds")
+        odds_s = f"{int(odds):+d}" if odds not in (None, "") else "-"
+        print(f"  {(r.get('placed_date') or '-'):<10} {(r.get('game_date') or '-'):<10} "
+              f"{(r.get('sport') or '-'):<6} {(r.get('selection') or '-'):<24.24} "
+              f"{odds_s:>6} ${ (r.get('stake') or 0.0):>7.2f} {result:>9} {bal_s:>9}")
+    print(f"{'='*78}\n")
