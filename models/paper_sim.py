@@ -377,4 +377,17 @@ def print_summary(rows: list[dict], start: float = START_BANKROLL) -> None:
             mark = "WON " if r["status"] == "won" else "LOST"
             print(f"    {r['game_date']}  {mark}  {r['selection']:<24} "
                   f"${r['stake']:.2f} -> ${r['profit']:+.2f}   bal ${r['balance']:.2f}")
+
+    open_bets = sorted(
+        (r for r in rows if r.get("status") == "open"),
+        key=lambda r: (r.get("placed_date") or "", r.get("bet_id") or ""),
+    )
+    if open_bets:
+        pending = sum(r.get("stake") or 0.0 for r in open_bets)
+        print(f"\n  Open bets (pending settlement) — ${pending:.2f} at stake:")
+        for r in open_bets:
+            dec = r.get("odds_decimal") or american_to_decimal(int(r["odds"]))
+            payout = (r.get("stake") or 0.0) * (dec - 1)
+            print(f"    placed {r['placed_date']}  {r['sport']:<6} {r['selection']:<24} "
+                  f"@{int(r['odds']):+d}  ${r['stake']:.2f} -> +${payout:.2f} if win")
     print(f"{'='*70}\n")
