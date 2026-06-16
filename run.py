@@ -266,7 +266,7 @@ def main():
     # On by default: every normal run settles finished bets and logs new >=5% edges.
     parser.add_argument("--no-paper",     action="store_true", help="Skip the paper-trading ledger update for this run")
     parser.add_argument("--sim-status",   action="store_true", help="Print the paper-trading bankroll summary and exit (no ingest/betting)")
-    parser.add_argument("--sim-min-edge", type=float, default=None, help="Min edge to log in the paper sim (default 0.05)")
+    parser.add_argument("--sim-min-edge", type=float, default=None, help="Min edge to log in the paper sim (default 0.07)")
     parser.add_argument("--sim-bankroll", type=float, default=None, help="Starting bankroll for the paper sim (default env BANKROLL)")
     args = parser.parse_args()
 

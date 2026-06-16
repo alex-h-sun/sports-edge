@@ -2,7 +2,7 @@
 
 A persistent CSV ledger that turns the live edges found on each ``python run.py``
 into a running, compounding equity curve — "if we'd started with $1000 and bet
-every >=5% edge, how much would we have now?". Logging runs by default on every
+every >=7% edge, how much would we have now?". Logging runs by default on every
 edge-finding run (opt out with ``--no-paper``).
 
 Why forward-only (not a historical backtest): ``odds_snapshots`` stores only
@@ -35,7 +35,7 @@ from edge.manual import NHL_TEAM_NAMES
 
 LEDGER_PATH = "data/sims/paper_ledger.csv"
 START_BANKROLL = 1000.0
-SIM_MIN_EDGE = 0.05
+SIM_MIN_EDGE = 0.07
 KELLY_FRACTION = 0.25
 MIN_STAKE = 1.0          # dust / ruin floor: skip bets the bankroll can't cover
 STALE_DAYS = 5           # an unmatched bet older than this is voided (stake refunded)
