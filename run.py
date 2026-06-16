@@ -373,18 +373,19 @@ def main():
     if all_edges:
         save_edges(all_edges)
 
-    # paper-trading ledger: settle finished bets off the running balance, then log
-    # today's qualifying moneyline edges as new open positions (compounding Kelly).
-    # Runs by default on every edge-finding run; opt out with --no-paper.
+    # paper-trading ledger: settle finished bets, then log today's qualifying
+    # moneyline edges as new open positions. Stakes are flat quarter-Kelly off the
+    # fixed starting bankroll (not the running balance), so bet sizing never changes
+    # as the curve moves. Runs by default; opt out with --no-paper.
     if not args.no_paper:
         from models.paper_sim import (
             load_ledger, settle_ledger, append_edges, save_ledger,
-            current_bankroll, print_summary, SIM_MIN_EDGE,
+            print_summary, SIM_MIN_EDGE,
         )
         start = args.sim_bankroll if args.sim_bankroll is not None else BANKROLL
         min_edge = args.sim_min_edge if args.sim_min_edge is not None else SIM_MIN_EDGE
         rows = settle_ledger(load_ledger(), DB_PATH, start=start)
-        rows = append_edges(rows, all_edges, current_bankroll(rows, start),
+        rows = append_edges(rows, all_edges, start,
                             min_edge=min_edge, start=start)
         save_ledger(rows)
         print_summary(rows, start)

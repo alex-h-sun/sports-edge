@@ -1,9 +1,9 @@
 """Forward paper-trading bankroll simulator.
 
 A persistent CSV ledger that turns the live edges found on each ``python run.py``
-into a running, compounding equity curve — "if we'd started with $1000 and bet
-every >=7% edge, how much would we have now?". Logging runs by default on every
-edge-finding run (opt out with ``--no-paper``).
+into a running equity curve — "if we'd started with $1000 and bet every >=7%
+edge, how much would we have now?". Logging runs by default on every edge-finding
+run (opt out with ``--no-paper``).
 
 Why forward-only (not a historical backtest): ``odds_snapshots`` stores only
 recent *live* odds, so there are no per-game closing prices for past seasons to
@@ -11,10 +11,10 @@ replay against (the free Odds API tier cannot backfill them). The honest path is
 to log each real live edge as it happens and settle it against the actual game
 result once it finishes — a true P&L curve that accrues over time.
 
-Staking is compounding quarter-Kelly: every new bet is sized off the *current*
-settled bankroll via ``edge.calculator.kelly_stake`` (not the stake already on the
-edge record, which was sized off the fixed env BANKROLL). Same-day bets are all
-sized off the same start-of-day bankroll, never sequentially within the day.
+Staking is flat quarter-Kelly: every new bet is sized off the *fixed* starting
+bankroll ($1000) via ``edge.calculator.kelly_stake`` (not the running balance and
+not the edge record's stake, which was sized off the env BANKROLL). Stake amounts
+therefore stay constant as the equity curve moves up or down.
 
 v1 logs and settles **moneyline only** — its result (team / player win-loss) maps
 cleanly onto the game-log tables. Totals/props settlement needs the realized
@@ -160,10 +160,11 @@ def append_edges(
 ) -> list[dict]:
     """Append today's qualifying moneyline edges as open bets (quarter-Kelly).
 
-    Every new bet is sized off ``bankroll`` (the current settled balance) so the
-    curve compounds. Re-runs the same day are idempotent: a bet already present
-    for (placed_date, market, game, selection) is skipped. Stakes below
-    ``MIN_STAKE`` (or when the bankroll is exhausted) are dropped.
+    Every new bet is sized off ``bankroll`` via quarter-Kelly. Callers pass the
+    fixed starting bankroll (e.g. $1000) for flat sizing, so stake amounts stay
+    constant regardless of the running balance. Re-runs the same day are
+    idempotent: a bet already present for (placed_date, market, game, selection)
+    is skipped. Stakes below ``MIN_STAKE`` are dropped.
     """
     placed_date = placed_date or date.today().isoformat()
     existing = {r["bet_id"] for r in rows}
