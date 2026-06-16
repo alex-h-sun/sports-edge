@@ -16,7 +16,10 @@ python run.py --sport tennis --ingest-history   # first tennis run: Sackmann his
 python run.py --train                # retrain models before finding edges
 python run.py --sport tennis --export-features  # dump OBT parquet for Colab training
 python run.py --sport tennis --import-models    # pull cloud-trained artifacts back
-streamlit run dashboard.py           # interactive view
+python run.py --no-paper             # skip the paper-trading ledger update for this run
+python run.py --sim-status           # print the bankroll-sim summary and exit (no ingest)
+python run.py --sim-history          # print every paper-sim bet and exit (no ingest)
+streamlit run dashboard.py           # interactive view (incl. Bankroll Simulator section)
 ```
 
 ## Architecture
@@ -25,4 +28,5 @@ streamlit run dashboard.py           # interactive view
 - `models/artifacts/*.pkl` — one model per market (moneyline/spread/totals + player props per stat)
 - `models/train.py` / `models/evaluate.py` — training and scoring (AUC/Brier/MAE + ROI backtest)
 - `edge/calculator.py` — edge math: American odds → implied prob → vig-strip → edge → fractional Kelly stake
+- `models/paper_sim.py` — forward paper-trading ledger: on every run (unless `--no-paper`) it settles finished bets against game-log results and logs new moneyline edges (≥`SIM_MIN_EDGE`, default 7%) as open positions, staked flat quarter-Kelly off a fixed $1000 bankroll. Persists to `data/sims/paper_ledger.csv`. Forward-only because `odds_snapshots` holds no historical odds to backtest against. Moneyline only in v1.
 - Config comes from `.env` via `python-dotenv`, not code constants
