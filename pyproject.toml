@@ -16,10 +16,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["jupyter", "matplotlib", "seaborn", "ipykernel", "pytest"]
+dev = ["jupyter", "matplotlib", "seaborn", "ipykernel", "pytest", "httpx"]
 # Heavy ML deps for the tennis model bake-off (compare.py). Intended for the
 # cloud (Colab GPU) tier only — the core local install never needs these.
 tennis = ["torch", "xgboost"]
+# Web app serving tier (webapp/). Built on Starlette (no FastAPI/pydantic needed);
+# scipy backs edge.calculator, boto3 is only used for s3:// snapshot sync.
+serve = ["starlette", "uvicorn[standard]", "itsdangerous", "boto3", "scipy"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["edge*", "features*", "models*", "ingestion*", "webapp*"]

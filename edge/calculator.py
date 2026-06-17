@@ -1,5 +1,6 @@
 """Convert model output to implied probability and calculate edge vs. book."""
 
+import os
 import pickle
 from pathlib import Path
 
@@ -7,7 +8,9 @@ import numpy as np
 import polars as pl
 from scipy.stats import norm
 
-ARTIFACTS_DIR = Path(__file__).parent.parent / "models" / "artifacts"
+# Default to the in-repo models/artifacts; override with the ARTIFACTS_DIR env var so a
+# deployed server can read artifacts from a mounted snapshot volume (e.g. /data/artifacts).
+ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR") or Path(__file__).parent.parent / "models" / "artifacts")
 
 # Isotonic calibrators saturate their tails to exactly 0.0/1.0, and no real
 # sporting moneyline is a certainty. Clamp to a plausible band so an overconfident

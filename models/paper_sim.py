@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
@@ -33,7 +34,9 @@ from pathlib import Path
 from edge.calculator import american_to_decimal, kelly_stake
 from edge.manual import NHL_TEAM_NAMES
 
-LEDGER_PATH = "data/sims/paper_ledger.csv"
+# Default to the in-repo ledger; override with LEDGER_PATH so a deployed server can
+# read/write the ledger on its snapshot volume (e.g. /data/sims/paper_ledger.csv).
+LEDGER_PATH = os.getenv("LEDGER_PATH", "data/sims/paper_ledger.csv")
 START_BANKROLL = 1000.0
 SIM_MIN_EDGE = 0.07
 KELLY_FRACTION = 0.25

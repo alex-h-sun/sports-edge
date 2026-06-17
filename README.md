@@ -55,7 +55,7 @@ python run.py --sport nba      # NBA only
 python run.py --no-odds        # skip odds fetch, use cached (no book comparison)
 ```
 
-### Dashboard
+### Dashboard (local Streamlit)
 
 ```bash
 streamlit run dashboard.py
@@ -63,6 +63,54 @@ streamlit run dashboard.py
 
 The dashboard includes a **Bankroll Simulator** section that renders the paper-trading
 equity curve, headline stats, and full bet ledger.
+
+### Web app (deployable)
+
+A web version lives in `webapp/` (Starlette JSON API) + `frontend/` (React + Vite + TS
+SPA). It is **read-only**: it serves edges, the manual calculator, injuries, the odds
+quota, and the bankroll curve from a published snapshot of `sports.db` + artifacts. The
+heavy ingest/training pipeline stays offline (it cannot run from a cloud IP anyway), and
+the whole app sits behind a single shared password.
+
+```
+offline:  python run.py  -> sports.db + models/artifacts
+          python scripts/publish_snapshot.py --url s3://bucket/prefix   (or file:///dir)
+
+online:   one container -> Starlette API + built SPA, reads /data (snapshot volume)
+```
+
+Run it locally against your existing data:
+
+```bash
+# 1) backend (dev): http://localhost:8000
+pip install -e ".[serve]"
+APP_PASSWORD=secret SESSION_SECRET=dev uvicorn webapp.main:app --reload
+
+# 2) frontend (dev): http://localhost:5173, proxies /api -> :8000
+cd frontend && npm install && npm run dev
+```
+
+Or the full image (serves the built SPA + API on one port, parity with production):
+
+```bash
+APP_PASSWORD=secret SESSION_SECRET=dev docker compose up --build   # http://localhost:8000
+```
+
+**Deploy (Render / Railway / Fly.io):** the multi-stage `Dockerfile` builds the SPA and
+the Python serving image; `render.yaml` provisions a web service with a 1 GB persistent
+disk mounted at `/data`. Set `APP_PASSWORD`, `SESSION_SECRET`, and (for snapshot sync)
+`SNAPSHOT_URL` + S3/R2 credentials. On boot and on `POST /api/admin/reload`, the app pulls
+the latest published snapshot onto the volume.
+
+**Snapshot publishing** packages a WAL-checkpointed copy of `sports.db`, the `.pkl`
+artifacts, and the paper ledger into a `.tar.gz` (+ a `latest.json` manifest) and uploads
+it to S3-compatible storage (Cloudflare R2 works via `S3_ENDPOINT_URL`) or a local/NFS
+directory. Re-run it after each `python run.py --train`.
+
+> Note: live moneyline/totals/props edges need **fresh odds and upcoming games** in the
+> snapshot, so publish near game time. The **manual calculator works on any snapshot**
+> because you supply the odds. Built on Starlette (FastAPI's foundation) to keep the
+> serving image lean — no torch, no pydantic.
 
 ### Bankroll simulator (forward paper-trading)
 

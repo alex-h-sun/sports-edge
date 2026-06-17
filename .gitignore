@@ -14,6 +14,13 @@ __pycache__/
 .ipynb_checkpoints/
 models/artifacts/
 
+# Web app build + snapshot artifacts
+frontend/node_modules/
+frontend/dist/
+webapp/static/
+*.tar.gz
+*.tar.zst
+
 # Curated source data (small, hand-maintained — keep these despite data/*.csv above)
 !data/court_speed.csv
 !data/tournament_locations.csv

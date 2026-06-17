@@ -1,0 +1,23 @@
+# Local parity run: serve the JSON API + built SPA against your existing local
+# DB + artifacts (no snapshot sync). Build the image and start it with:
+#   APP_PASSWORD=secret SESSION_SECRET=dev docker compose up --build
+# then open http://localhost:8000
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-changeme}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-secret-change-me}
+      ODDS_API_KEY: ${ODDS_API_KEY:-}
+      APP_ENV: development          # http cookie (not https-only) for localhost
+      SNAPSHOT_URL: ""              # parity mode: serve the mounted files, no sync
+      SNAPSHOT_DATA_DIR: /data
+      DB_PATH: /data/sports.db
+      ARTIFACTS_DIR: /artifacts
+      LEDGER_PATH: /data/sims/paper_ledger.csv
+    volumes:
+      - ./data:/data
+      - ./models/artifacts:/artifacts:ro

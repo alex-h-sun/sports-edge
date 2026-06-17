@@ -1,0 +1,30 @@
+# Render.com blueprint: one Docker web service + a persistent disk for the snapshot.
+# On Fly.io the equivalent is a [mounts] volume at /data in fly.toml.
+services:
+  - type: web
+    name: sports-edge
+    runtime: docker
+    plan: starter            # starter has a persistent disk; free has none
+    healthCheckPath: /api/health
+    disk:
+      name: snapshot
+      mountPath: /data       # holds sports.db + artifacts/ + sims/ (the snapshot)
+      sizeGB: 1
+    envVars:
+      - key: APP_PASSWORD
+        sync: false           # set in the dashboard
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ODDS_API_KEY
+        sync: false
+      # snapshot source (object storage). Omit to manage /data manually.
+      - key: SNAPSHOT_URL
+        sync: false           # e.g. s3://my-bucket/sports-edge
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: auto
+      - key: S3_ENDPOINT_URL
+        sync: false           # set for Cloudflare R2
