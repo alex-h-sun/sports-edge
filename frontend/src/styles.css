@@ -97,6 +97,7 @@ button, .btn {
 }
 button:disabled { opacity: .5; cursor: default; }
 .btn.ghost { background: transparent; color: var(--muted); border-color: var(--border); }
+.row-actions { display: flex; gap: 8px; align-items: center; }
 
 /* ── tables ── */
 table.grid { width: 100%; border-collapse: collapse; margin-top: 10px; }

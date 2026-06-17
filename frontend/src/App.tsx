@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "./api";
-import type { Meta } from "./api";
+import type { Meta, EdgesResponse } from "./api";
 import { useAsync } from "./hooks";
 import { Login } from "./components/Login";
 import { Controls } from "./components/Controls";
@@ -36,8 +36,15 @@ export function App() {
   return (
     <Dashboard
       meta={meta}
-      onLogout={() => {
-        void api.logout().finally(() => setAuthed(false));
+      onLogout={async () => {
+        // Tell the server to drop the session, then hard-reload so auth is
+        // re-checked against the server (the source of truth) and all
+        // in-memory state is cleared. Runs even if the request fails.
+        try {
+          await api.logout();
+        } finally {
+          window.location.reload();
+        }
       }}
     />
   );
@@ -49,8 +56,28 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
   const [minEdge, setMinEdge] = useState<number>(meta.min_edge);
   const [reloading, setReloading] = useState(false);
 
+  // Edges are computed only on explicit request: the pipeline builds features
+  // and scores every market, which takes several seconds. Nothing runs until
+  // the user presses "Find value bets".
+  const [edges, setEdges] = useState<EdgesResponse | null>(null);
+  const [edgesLoading, setEdgesLoading] = useState(false);
+  const [edgesError, setEdgesError] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
+
   const query = { sports, minEdge, markets };
-  const edges = useAsync(() => api.edges(query), [sports.join(","), markets.join(","), minEdge]);
+
+  const searchEdges = useCallback(() => {
+    setSearched(true);
+    setEdgesLoading(true);
+    setEdgesError(null);
+    api
+      .edges({ sports, minEdge, markets })
+      .then((d) => setEdges(d))
+      .catch((e: unknown) => setEdgesError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setEdgesLoading(false));
+  }, [sports, markets, minEdge]);
+
+  // These are cheap reads, so they load on mount as before.
   const injuries = useAsync(() => api.injuries(), []);
   const quota = useAsync(() => api.quota(), []);
   const bankroll = useAsync(() => api.bankroll(), []);
@@ -59,7 +86,7 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
     setReloading(true);
     try {
       await api.reload();
-      edges.reload();
+      if (searched) searchEdges(); // only re-run edges if the user already searched
       injuries.reload();
       quota.reload();
       bankroll.reload();
@@ -96,8 +123,15 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
           setMinEdge={setMinEdge}
           allSports={meta.sports}
         />
-        <SummaryTiles data={edges.data} />
-        <ValueBets data={edges.data} loading={edges.loading} query={query} />
+        {searched && <SummaryTiles data={edges} />}
+        <ValueBets
+          data={edges}
+          loading={edgesLoading}
+          error={edgesError}
+          searched={searched}
+          onSearch={searchEdges}
+          query={query}
+        />
         <ManualCalculator />
         <div className="two-up">
           <Injuries data={injuries.data} />

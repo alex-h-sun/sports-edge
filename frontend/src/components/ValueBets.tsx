@@ -5,10 +5,13 @@ import { edgeDetail, money, odds, pct } from "../format";
 interface Props {
   data: EdgesResponse | null;
   loading: boolean;
+  error: string | null;
+  searched: boolean;
+  onSearch: () => void;
   query: EdgeQuery;
 }
 
-export function ValueBets({ data, loading, query }: Props) {
+export function ValueBets({ data, loading, error, searched, onSearch, query }: Props) {
   const edges = data?.edges ?? [];
   const errors = data?.errors ?? [];
 
@@ -16,15 +19,26 @@ export function ValueBets({ data, loading, query }: Props) {
     <div className="card">
       <div className="card-head">
         <h2>📋 Value Bets</h2>
-        {edges.length > 0 && (
-          <a className="btn" href={api.edgesCsvUrl(query)}>⬇ CSV</a>
-        )}
+        <div className="row-actions">
+          {searched && edges.length > 0 && (
+            <a className="btn ghost" href={api.edgesCsvUrl(query)}>⬇ CSV</a>
+          )}
+          <button className="btn" onClick={onSearch} disabled={loading}>
+            {loading ? "Searching…" : searched ? "↻ Refresh" : "Find value bets"}
+          </button>
+        </div>
       </div>
 
+      {error && <div className="warn">{error}</div>}
       {errors.length > 0 && <div className="warn">{errors.join(" · ")}</div>}
 
-      {loading ? (
-        <div className="muted">Loading…</div>
+      {!searched ? (
+        <div className="muted">
+          Press “Find value bets” to score the selected markets against the current
+          odds. This builds features and runs every model, so it takes a few seconds.
+        </div>
+      ) : loading ? (
+        <div className="muted">Searching…</div>
       ) : edges.length === 0 ? (
         <div className="muted">
           No edges above threshold. Live edges need fresh odds and upcoming games in
