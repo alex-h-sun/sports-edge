@@ -13,7 +13,7 @@ odds for tennis are handled separately in ingestion/odds.py.
 import io
 import sqlite3
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -96,6 +96,16 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (tourney_name, tourney_date)
         )
     """)
+    # HTTP validators (ETag / Last-Modified) per Sackmann CSV URL, so a re-run can
+    # send a conditional GET and skip re-downloading a file that has not changed.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tennis_fetch_cache (
+            url           TEXT PRIMARY KEY,
+            etag          TEXT,
+            last_modified TEXT,
+            fetched_at    TEXT
+        )
+    """)
     conn.commit()
 
 
@@ -111,14 +121,59 @@ def _upsert(conn: sqlite3.Connection, table: str, rows: list[dict]) -> None:
     conn.commit()
 
 
+# ── conditional-GET cache ────────────────────────────────────────────────────────
+
+def _cache_get(conn: sqlite3.Connection, url: str) -> tuple[str | None, str | None]:
+    """Return the stored (etag, last_modified) for a URL, or (None, None) if unseen."""
+    row = conn.execute(
+        "SELECT etag, last_modified FROM tennis_fetch_cache WHERE url = ?", (url,)
+    ).fetchone()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def _cache_put(conn: sqlite3.Connection, url: str,
+               etag: str | None, last_modified: str | None) -> None:
+    """Record the validators returned with a successful download of `url`."""
+    conn.execute(
+        "INSERT OR REPLACE INTO tennis_fetch_cache (url, etag, last_modified, fetched_at) "
+        "VALUES (?, ?, ?, ?)",
+        (url, etag, last_modified,
+         datetime.now(timezone.utc).isoformat(timespec="seconds")),
+    )
+    conn.commit()
+
+
 # ── Sackmann matches ───────────────────────────────────────────────────────────
 
-def _fetch_year(tour: str, year: int) -> list[dict]:
-    """Download and parse one tour-year of Sackmann matches. Returns row dicts."""
+def _fetch_year(tour: str, year: int,
+                conn: sqlite3.Connection | None = None) -> tuple[str, list[dict]]:
+    """Download and parse one tour-year of Sackmann matches.
+
+    Returns ``(status, rows)`` where status is:
+      - ``"ok"``        — fetched fresh content; ``rows`` are the parsed matches.
+      - ``"unchanged"`` — the server answered 304 Not Modified (we already have it);
+                          ``rows`` is empty and nothing should be re-ingested.
+      - ``"missing"``   — 404 (e.g. a future year not yet published); ``rows`` empty.
+
+    When ``conn`` is given, a stored ETag / Last-Modified for this URL is sent as a
+    conditional GET so an unchanged file is not re-downloaded, and the validators
+    from a fresh response are persisted for next time. Without ``conn`` (or when the
+    server returns no validators) it behaves like a plain unconditional fetch.
+    """
     url = _SACKMANN[tour].format(year=year)
-    resp = requests.get(url, headers=_HEADERS, timeout=30)
+    headers = dict(_HEADERS)
+    if conn is not None:
+        etag, last_modified = _cache_get(conn, url)
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code == 304:
+        return ("unchanged", [])
     if resp.status_code == 404:
-        return []
+        return ("missing", [])
     resp.raise_for_status()
 
     # Read every column as string; we coerce types later in the cleaning stage.
@@ -135,27 +190,46 @@ def _fetch_year(tour: str, year: int) -> list[dict]:
             df = df.with_columns(pl.lit(None).alias(c))
     df = df.select(_MATCH_COLS).with_columns(pl.lit(tour).alias("tour"))
 
-    return df.to_dicts()
+    if conn is not None:
+        _cache_put(conn, url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"))
+
+    return ("ok", df.to_dicts())
+
+
+def _upsert_matches(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """Upsert match rows; return how many were brand new (not just replaced)."""
+    before = conn.execute("SELECT COUNT(*) FROM tennis_matches").fetchone()[0]
+    _upsert(conn, "tennis_matches", rows)
+    after = conn.execute("SELECT COUNT(*) FROM tennis_matches").fetchone()[0]
+    return after - before
 
 
 def fetch_seasons(years: list[int], tours: list[str], db_path: str) -> None:
-    """Fetch full match history for the given years and tours (e.g. range(2000, 2027))."""
+    """Fetch full match history for the given years and tours (e.g. range(2000, 2027)).
+
+    Each tour-year is fetched with a conditional GET, so re-running only re-downloads
+    files that have actually changed (past seasons are immutable -> all skipped).
+    """
     conn = _get_conn(db_path)
     _ensure_tables(conn)
 
     for tour in tours:
-        total = 0
+        total = new_total = 0
         for year in years:
             try:
-                rows = _fetch_year(tour, year)
+                status, rows = _fetch_year(tour, year, conn)
             except Exception as e:
                 print(f"  warning: {tour} {year} failed ({e})")
                 continue
-            _upsert(conn, "tennis_matches", rows)
+            if status == "unchanged":
+                print(f"  {tour.upper()} {year}: unchanged since last pull, skipped")
+                continue
+            new = _upsert_matches(conn, rows)
             total += len(rows)
-            print(f"  {tour.upper()} {year}: {len(rows)} matches")
+            new_total += new
+            print(f"  {tour.upper()} {year}: {len(rows)} matches ({new} new)")
             time.sleep(_RATE_LIMIT)
-        print(f"  {tour.upper()} total: {total} matches")
+        print(f"  {tour.upper()} total: {total} matches ({new_total} new)")
 
     load_court_speed(db_path, conn)
     load_locations(db_path, conn)
@@ -163,7 +237,13 @@ def fetch_seasons(years: list[int], tours: list[str], db_path: str) -> None:
 
 
 def fetch_recent(db_path: str, tours: list[str] | None = None, year: int | None = None) -> None:
-    """Re-pull the current year's CSV (Sackmann appends in-season) for an incremental update."""
+    """Re-pull the current year's CSV (Sackmann appends in-season) for an incremental update.
+
+    Uses a conditional GET keyed on the stored ETag / Last-Modified, so running this
+    more than once a day does not re-download an unchanged file: if nothing new has
+    been published the server returns 304 and the fetch is skipped. When the file has
+    grown, the whole current-year CSV is re-parsed but only the new matches are added.
+    """
     tours = tours or ["atp", "wta"]
     year = year or date.today().year
 
@@ -171,12 +251,15 @@ def fetch_recent(db_path: str, tours: list[str] | None = None, year: int | None 
     _ensure_tables(conn)
     for tour in tours:
         try:
-            rows = _fetch_year(tour, year)
+            status, rows = _fetch_year(tour, year, conn)
         except Exception as e:
             print(f"  warning: {tour} {year} failed ({e})")
             continue
-        _upsert(conn, "tennis_matches", rows)
-        print(f"  Tennis recent {tour.upper()} {year}: {len(rows)} matches")
+        if status == "unchanged":
+            print(f"  Tennis recent {tour.upper()} {year}: unchanged since last pull, skipped")
+            continue
+        new = _upsert_matches(conn, rows)
+        print(f"  Tennis recent {tour.upper()} {year}: {len(rows)} matches ({new} new)")
         time.sleep(_RATE_LIMIT)
 
     load_court_speed(db_path, conn)
