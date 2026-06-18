@@ -58,6 +58,7 @@ main { display: flex; flex-direction: column; gap: 16px; }
   border-radius: 10px; padding: 16px;
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
+.pull-status { font-size: 13px; color: var(--text); }
 
 /* ── tiles ── */
 .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }

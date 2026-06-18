@@ -20,11 +20,18 @@ python run.py --no-paper             # skip the paper-trading ledger update for 
 python run.py --sim-status           # print the bankroll-sim summary and exit (no ingest)
 python run.py --sim-history          # print every paper-sim bet and exit (no ingest)
 streamlit run dashboard.py           # interactive view (incl. Bankroll Simulator section)
+uvicorn webapp.main:app --reload     # deployable web app (React SPA + JSON API)
 ```
+
+The web app's **Pull data** button (`POST /api/pull`) runs the same ingest→edge→paper
+flow as `python run.py`, writing the shared `DB_PATH` — so the terminal and the web app
+stay in sync (one database). See the "Web app" section in `README.md`.
 
 ## Architecture
 
-- `run.py` — orchestrator (ingest → features → predict → edges → alert); holds season lists
+- `pipeline.py` — shared ingest→features→edge→paper orchestration (`run_pull`, the ingest/`find_edges` helpers); imported by BOTH `run.py` and `webapp` so the CLI and the web app's pull run one implementation
+- `run.py` — CLI entry/arg-parsing over `pipeline` (+ backtest/arb/matchup/sim/export modes); holds season lists
+- `webapp/` — Starlette JSON API + built React SPA (`frontend/`); read-only snapshot serving plus live `POST /api/pull` (→ `pipeline.run_pull`)
 - `models/artifacts/*.pkl` — one model per market (moneyline/spread/totals + player props per stat)
 - `models/train.py` / `models/evaluate.py` — training and scoring (AUC/Brier/MAE + ROI backtest)
 - `edge/calculator.py` — edge math: American odds → implied prob → vig-strip → edge → fractional Kelly stake

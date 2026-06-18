@@ -31,7 +31,7 @@ COPY features/ ./features/
 COPY models/ ./models/
 COPY ingestion/ ./ingestion/
 COPY webapp/ ./webapp/
-COPY run.py ./
+COPY run.py pipeline.py ./
 RUN pip install ".[serve]"
 
 # built SPA from stage 1

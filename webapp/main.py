@@ -1,7 +1,12 @@
 """Starlette application: JSON API + the built React SPA.
 
-The heavy pipeline (run.py) stays offline and publishes a snapshot of sports.db +
-artifacts; this app reads that snapshot and serves edges. Run it with::
+Two ways to get data in:
+  - read-only: the offline pipeline (run.py) publishes a snapshot of sports.db +
+    artifacts and this app pulls it on boot / via POST /api/admin/reload;
+  - live: POST /api/pull runs the same ingest+edge pipeline as run.py against the
+    shared DB, so the app can refresh itself instead of only showing a snapshot.
+
+Run it with::
 
     uvicorn webapp.main:app --host 0.0.0.0 --port 8000
 """
@@ -23,6 +28,7 @@ from webapp.routers import edges as edges_routes
 from webapp.routers import manual as manual_routes
 from webapp.routers import meta as meta_routes
 from webapp.routers import misc as misc_routes
+from webapp.routers import pull as pull_routes
 
 logging.basicConfig(level=logging.INFO)
 
@@ -58,6 +64,7 @@ def create_app() -> Starlette:
         *manual_routes.routes,
         *bankroll_routes.routes,
         *misc_routes.routes,
+        *pull_routes.routes,
         *admin_routes.routes,
         *_spa_routes(),
     ]

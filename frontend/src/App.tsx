@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import type { Meta, EdgesResponse } from "./api";
+import { SPORT_LABELS } from "./constants";
 import { useAsync } from "./hooks";
 import { Login } from "./components/Login";
 import { Controls } from "./components/Controls";
@@ -36,6 +37,7 @@ export function App() {
   return (
     <Dashboard
       meta={meta}
+      reloadMeta={loadMeta}
       onLogout={async () => {
         // Tell the server to drop the session, then hard-reload so auth is
         // re-checked against the server (the source of truth) and all
@@ -50,11 +52,22 @@ export function App() {
   );
 }
 
-function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
+function Dashboard({
+  meta,
+  reloadMeta,
+  onLogout,
+}: {
+  meta: Meta;
+  reloadMeta: () => void;
+  onLogout: () => void;
+}) {
   const [sports, setSports] = useState<string[]>(meta.default_sports);
   const [markets, setMarkets] = useState<string[]>(["Moneyline", "Totals", "Props"]);
   const [minEdge, setMinEdge] = useState<number>(meta.min_edge);
   const [reloading, setReloading] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [pullMsg, setPullMsg] = useState<string | null>(null);
+  const [pullErr, setPullErr] = useState<string | null>(null);
 
   // Edges are computed only on explicit request: the pipeline builds features
   // and scores every market, which takes several seconds. Nothing runs until
@@ -97,6 +110,45 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
     }
   }
 
+  // Live pull: ingest fresh games/odds and recompute edges against the shared DB —
+  // the same work `python run.py` does, so the terminal and the web app stay in sync.
+  async function pullData() {
+    const labels = sports.map((s) => SPORT_LABELS[s] ?? s).join(", ");
+    if (
+      !window.confirm(
+        `Pull fresh games + odds for ${labels} now?\n` +
+          "This fetches live odds and uses your Odds API quota."
+      )
+    ) {
+      return;
+    }
+    setPulling(true);
+    setPullErr(null);
+    setPullMsg(null);
+    try {
+      const r = await api.pull({ sports });
+      const parts = [`${r.n_edges} edge${r.n_edges === 1 ? "" : "s"}`, `${r.duration_s}s`];
+      if (r.quota) parts.push(`quota ${r.quota.remaining} left`);
+      const problems = [
+        ...r.stages
+          .filter((s) => s.status === "error")
+          .map((s) => [s.sport, s.stage].filter(Boolean).join(" ")),
+        ...r.edge_errors,
+      ];
+      if (problems.length) parts.push(`issues: ${problems.join("; ")}`);
+      setPullMsg(`Pulled ${r.sports.join(", ")} · ${parts.join(" · ")}`);
+      reloadMeta(); // refresh the header's snapshot timestamp
+      if (searched) searchEdges();
+      injuries.reload();
+      quota.reload();
+      bankroll.reload();
+    } catch (e) {
+      setPullErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPulling(false);
+    }
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -106,7 +158,20 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
           {meta.snapshot_ts && (
             <span className="muted">· snapshot {new Date(meta.snapshot_ts).toLocaleString()}</span>
           )}
-          <button className="btn ghost" onClick={reloadSnapshot} disabled={reloading}>
+          <button
+            className="btn"
+            onClick={pullData}
+            disabled={pulling || reloading}
+            title="Ingest fresh games + odds and recompute edges (uses Odds API quota)"
+          >
+            {pulling ? "Pulling…" : "⤓ Pull data"}
+          </button>
+          <button
+            className="btn ghost"
+            onClick={reloadSnapshot}
+            disabled={reloading || pulling}
+            title="Re-download the published snapshot from storage (read-only)"
+          >
             {reloading ? "Reloading…" : "↻ Reload snapshot"}
           </button>
           <button className="btn ghost" onClick={onLogout}>Sign out</button>
@@ -114,6 +179,11 @@ function Dashboard({ meta, onLogout }: { meta: Meta; onLogout: () => void }) {
       </header>
 
       <main>
+        {(pullErr || pullMsg) && (
+          <div className={`card pull-status${pullErr ? " error" : ""}`}>
+            {pullErr ? `Pull failed: ${pullErr}` : pullMsg}
+          </div>
+        )}
         <Controls
           sports={sports}
           setSports={setSports}

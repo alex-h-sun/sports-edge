@@ -11,66 +11,19 @@ import argparse
 import os
 from dotenv import load_dotenv
 
+# Ingest/edge helpers live in pipeline.py so the CLI and the web app's "Pull data"
+# button (pipeline.run_pull) run one and the same implementation.
+from pipeline import (
+    TENNIS_TOURS, find_edges, ingest_history, ingest_injuries,
+    ingest_odds, ingest_recent,
+)
+
 load_dotenv()
 
 DB_PATH   = os.getenv("DB_PATH", "data/sports.db")
 BANKROLL  = float(os.getenv("BANKROLL", "1000"))
 MIN_EDGE  = float(os.getenv("MIN_EDGE", "0.03"))
-SEASONS   = ["20212022", "20222023", "20232024", "20242025", "20252026"]
-NBA_SEASONS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
-TENNIS_YEARS = list(range(2015, 2027))
-TENNIS_TOURS = ["atp", "wta"]
 EXPORTS_DIR = "data/exports"
-
-
-def ingest_history(sport: str) -> None:
-    print(f"\n[ingest] Pulling historical data for {sport.upper()}...")
-    if sport == "nba":
-        from ingestion.nba import fetch_seasons, fetch_player_stats
-        fetch_seasons(NBA_SEASONS, DB_PATH)
-        fetch_player_stats(NBA_SEASONS, DB_PATH)
-    elif sport == "tennis":
-        from ingestion.tennis import fetch_seasons, fetch_weather
-        from ingestion.tennis_clean import clean
-        fetch_seasons(TENNIS_YEARS, TENNIS_TOURS, DB_PATH)
-        fetch_weather(DB_PATH)
-        clean(DB_PATH)
-    else:
-        from ingestion.nhl import fetch_seasons
-        fetch_seasons(SEASONS, DB_PATH)
-
-
-def ingest_recent(sport: str) -> None:
-    print(f"\n[ingest] Pulling recent games for {sport.upper()}...")
-    if sport == "nba":
-        from ingestion.nba import fetch_recent_games
-        fetch_recent_games(days_back=7, db_path=DB_PATH)
-    elif sport == "tennis":
-        from ingestion.tennis import fetch_recent, fetch_weather
-        from ingestion.tennis_clean import clean
-        fetch_recent(DB_PATH, TENNIS_TOURS)
-        fetch_weather(DB_PATH)
-        clean(DB_PATH)
-    else:
-        from ingestion.nhl import fetch_recent_games
-        fetch_recent_games(days_back=7, db_path=DB_PATH)
-
-
-def ingest_injuries(sport: str) -> None:
-    print(f"\n[ingest] Pulling injury report for {sport.upper()}...")
-    from ingestion.injuries import fetch_injuries
-    fetch_injuries(sport, DB_PATH)
-
-
-def ingest_odds(sport: str) -> None:
-    print(f"\n[ingest] Pulling odds for {sport.upper()}...")
-    if sport == "tennis":
-        from ingestion.odds import fetch_tennis_odds
-        fetch_tennis_odds(DB_PATH)
-        return
-    from ingestion.odds import fetch_odds, fetch_props
-    fetch_odds(sport, ["moneyline", "spread", "totals"], DB_PATH)
-    fetch_props(sport, DB_PATH)
 
 
 def train(sport: str) -> None:
@@ -127,39 +80,6 @@ def run_matchup(args) -> None:
         return
 
     print_edges(edges)
-
-
-def find_edges(sport: str) -> list[dict]:
-    print(f"\n[edge] Finding edges for {sport.upper()}...")
-
-    if sport == "tennis":
-        from edge.calculator import find_tennis_edges
-        return find_tennis_edges(DB_PATH, min_edge=MIN_EDGE, bankroll=BANKROLL)
-
-    from features.pipeline import (
-        build_nba_game_features, build_nba_player_features,
-        build_nhl_game_features, build_nhl_player_features,
-        add_injury_features, add_teammate_wowy_features, add_market_features,
-    )
-    from edge.calculator import find_moneyline_edges, find_totals_edges, find_prop_edges
-
-    if sport == "nba":
-        game_df   = build_nba_game_features(DB_PATH)
-        player_df = build_nba_player_features(DB_PATH)
-    else:
-        game_df   = build_nhl_game_features(DB_PATH)
-        player_df = build_nhl_player_features(DB_PATH)
-
-    game_df   = add_injury_features(game_df, sport, DB_PATH)
-    game_df   = add_market_features(game_df, sport, DB_PATH)
-    player_df = add_teammate_wowy_features(player_df, sport, DB_PATH)
-
-    edges = []
-    edges += find_moneyline_edges(game_df, sport, DB_PATH, min_edge=MIN_EDGE, bankroll=BANKROLL)
-    edges += find_totals_edges(game_df, sport, DB_PATH, bankroll=BANKROLL)
-    edges += find_prop_edges(player_df, sport, DB_PATH, bankroll=BANKROLL)
-
-    return sorted(edges, key=lambda x: x["edge"], reverse=True)
 
 
 def export_features(sport: str) -> None:
@@ -318,7 +238,7 @@ def main():
         if not args.no_odds:
             for sport in sports:
                 try:
-                    ingest_odds(sport)
+                    ingest_odds(sport, DB_PATH)
                 except EnvironmentError as e:
                     print(f"  Warning: {e} — skipping odds fetch, using cached odds")
         from edge.arbitrage import find_arbitrage
@@ -335,15 +255,15 @@ def main():
 
     for sport in sports:
         if args.ingest_history:
-            ingest_history(sport)
+            ingest_history(sport, DB_PATH)
 
-        ingest_recent(sport)
+        ingest_recent(sport, DB_PATH)
         if sport != "tennis":
-            ingest_injuries(sport)
+            ingest_injuries(sport, DB_PATH)
 
         if not args.no_odds:
             try:
-                ingest_odds(sport)
+                ingest_odds(sport, DB_PATH)
             except EnvironmentError as e:
                 print(f"  Warning: {e} — skipping odds fetch, edges won't include book comparison")
 
@@ -363,7 +283,7 @@ def main():
     all_edges = []
     for sport in sports:
         try:
-            all_edges += find_edges(sport)
+            all_edges += find_edges(sport, DB_PATH, min_edge=MIN_EDGE, bankroll=BANKROLL)
         except FileNotFoundError as e:
             print(f"  {e}")
             print(f"  Run: python run.py --train --sport {sport}")

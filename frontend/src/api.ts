@@ -81,6 +81,30 @@ export interface EdgeQuery {
   markets: string[];
 }
 
+export interface PullStage {
+  sport: string | null;
+  stage: string; // games | injuries | odds | paper
+  status: string; // ok | skipped | error
+  detail?: string;
+}
+
+export interface PullResult {
+  duration_s: number;
+  sports: string[];
+  fetched_odds: boolean;
+  stages: PullStage[];
+  n_edges: number;
+  edge_errors: string[];
+  quota: Quota | null;
+  paper: BankrollSummary | null;
+  published?: { version?: string; error?: string };
+}
+
+export interface PullRequest {
+  sports?: string[];
+  odds?: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -138,4 +162,6 @@ export const api = {
       body: JSON.stringify(body),
     }),
   reload: () => req<{ status: string; version?: string }>("/api/admin/reload", { method: "POST" }),
+  pull: (body: PullRequest = {}) =>
+    req<PullResult>("/api/pull", { method: "POST", body: JSON.stringify(body) }),
 };

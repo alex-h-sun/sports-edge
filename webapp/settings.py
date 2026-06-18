@@ -38,3 +38,10 @@ STATIC_DIR = Path(os.getenv("STATIC_DIR") or (Path(__file__).parent / "static"))
 SNAPSHOT_URL = os.getenv("SNAPSHOT_URL", "")
 # Base dir the snapshot extracts into; DB_PATH / ARTIFACTS_DIR / LEDGER_PATH live here.
 SNAPSHOT_DATA_DIR = os.getenv("SNAPSHOT_DATA_DIR") or (os.path.dirname(DB_PATH) or "data")
+
+# ── live pull (POST /api/pull) ──────────────────────────────────────────────────
+# After a web-app pull writes the shared DB, optionally re-publish a snapshot so other
+# machines (e.g. your laptop's `python -m webapp.snapshot --sync`) can pick it up. Only
+# meaningful on a deployed instance with SNAPSHOT_URL + write creds; off by default,
+# and locally the shared DB_PATH already keeps the terminal and web app in sync.
+PUBLISH_AFTER_PULL = os.getenv("PUBLISH_AFTER_PULL", "").lower() in ("1", "true", "yes")

@@ -193,6 +193,70 @@ def test_admin_reload(auth_client, tmp_path, monkeypatch):
     assert sqlite3.connect(str(vol / "sports.db")).execute("SELECT x FROM t").fetchone()[0] == 42
 
 
+# ── live pull (POST /api/pull) ──────────────────────────────────────────────────
+
+def test_pull_requires_auth(client):
+    assert client.post("/api/pull", json={"sports": ["nba"]}).status_code == 401
+
+
+def test_pull_runs_pipeline_and_clears_cache(auth_client, monkeypatch):
+    import pipeline
+    from webapp.services import edges as edges_svc
+
+    edges_svc._cache["nba"] = (0.0, [{"stale": True}])  # primed; the pull must clear it
+    captured = {}
+
+    def fake_run_pull(sports, db_path, **kw):
+        captured["sports"] = list(sports)
+        captured["db_path"] = db_path
+        captured["kw"] = kw
+        return {
+            "duration_s": 1.5, "sports": list(sports), "fetched_odds": kw.get("fetch_odds", True),
+            "ingested_games": True, "stages": [], "edges": [{"market": "Moneyline"}],
+            "n_edges": 1, "edge_errors": [],
+            "quota": {"remaining": 404, "used": 96, "fetched_at": "2026-06-17T05:00:00Z"},
+            "paper": None,
+        }
+
+    monkeypatch.setattr(pipeline, "run_pull", fake_run_pull)
+
+    r = auth_client.post("/api/pull", json={"sports": ["nba"], "odds": False})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["n_edges"] == 1
+    assert "edges" not in body                       # full list dropped from the response
+    assert body["quota"]["remaining"] == 404
+    # ran against the shared serving DB with the requested options
+    assert captured["sports"] == ["nba"]
+    assert captured["db_path"] == _DB
+    assert captured["kw"]["fetch_odds"] is False
+    assert edges_svc._cache == {}                     # cache cleared so /api/edges recomputes
+
+
+def test_pull_defaults_and_filters_sports(auth_client, monkeypatch):
+    import pipeline
+
+    seen = {}
+
+    def fake_run_pull(sports, db_path, **kw):
+        seen["sports"] = list(sports)
+        return {"duration_s": 0.0, "sports": list(sports), "fetched_odds": True,
+                "ingested_games": True, "stages": [], "edges": [], "n_edges": 0,
+                "edge_errors": [], "quota": None, "paper": None}
+
+    monkeypatch.setattr(pipeline, "run_pull", fake_run_pull)
+    # an unknown sport falls back to the server defaults rather than pulling nothing
+    auth_client.post("/api/pull", json={"sports": ["soccer"]})
+    assert seen["sports"] == ["nba", "nhl"]
+
+
+def test_pull_rejects_when_busy(auth_client, monkeypatch):
+    from webapp.routers import pull as pull_router
+    monkeypatch.setattr(pull_router, "_running", True)
+    r = auth_client.post("/api/pull", json={"sports": ["nba"]})
+    assert r.status_code == 409 and "already running" in r.json()["detail"]
+
+
 # ── DB-gated integration: real feature/model serving path ───────────────────────
 
 def _find_real() -> tuple[str | None, str | None]:

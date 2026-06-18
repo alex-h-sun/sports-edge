@@ -24,6 +24,12 @@ tennis = ["torch", "xgboost"]
 # scipy backs edge.calculator, boto3 is only used for s3:// snapshot sync.
 serve = ["starlette", "uvicorn[standard]", "itsdangerous", "boto3", "scipy"]
 
+[tool.setuptools]
+# pipeline.py is the shared CLI/web orchestration; ship it as an installed top-level
+# module so `import pipeline` resolves under the container's uvicorn (and after a plain
+# `pip install -e .`), not just when the repo root happens to be on sys.path.
+py-modules = ["pipeline"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["edge*", "features*", "models*", "ingestion*", "webapp*"]

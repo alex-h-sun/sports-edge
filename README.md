@@ -67,16 +67,29 @@ equity curve, headline stats, and full bet ledger.
 ### Web app (deployable)
 
 A web version lives in `webapp/` (Starlette JSON API) + `frontend/` (React + Vite + TS
-SPA). It is **read-only**: it serves edges, the manual calculator, injuries, the odds
-quota, and the bankroll curve from a published snapshot of `sports.db` + artifacts. The
-heavy ingest/training pipeline stays offline (it cannot run from a cloud IP anyway), and
-the whole app sits behind a single shared password.
+SPA). It serves edges, the manual calculator, injuries, the odds quota, and the bankroll
+curve, and sits behind a single shared password. There are **two ways to get data in**:
+
+- **Pull data** (the topbar button → `POST /api/pull`) runs the *same* ingest → edge →
+  paper-ledger pipeline as `python run.py`, in-process, writing the configured `DB_PATH`.
+  This is the live path: the app is no longer limited to a stale snapshot.
+- **Reload snapshot** (`POST /api/admin/reload`) re-downloads a pre-built snapshot that
+  the offline pipeline published (the original read-only path, for deployments where the
+  heavy pipeline runs elsewhere).
+
+**Terminal ↔ web app stay in sync** because both read the same `DB_PATH` (and
+`LEDGER_PATH` / `ARTIFACTS_DIR`). Locally that is `data/sports.db` for both, so a
+`python run.py` and a web **Pull data** write one and the same database — neither sees a
+stale copy. The shared ingest/edge code lives in `pipeline.py` (`pipeline.run_pull`), so
+the CLI and the button can't drift. WAL journaling is enabled on the pull so a terminal
+run and a web pull can touch the DB concurrently.
 
 ```
-offline:  python run.py  -> sports.db + models/artifacts
-          python scripts/publish_snapshot.py --url s3://bucket/prefix   (or file:///dir)
+local:    python run.py  ──┐
+          web "Pull data" ─┴─►  data/sports.db  (one shared DB → always in sync)
 
-online:   one container -> Starlette API + built SPA, reads /data (snapshot volume)
+deployed: python run.py -> publish_snapshot ─► snapshot store ─► container /data
+          (or the container's own "Pull data", optionally re-published — see below)
 ```
 
 Run it locally against your existing data:
@@ -98,9 +111,17 @@ APP_PASSWORD=secret SESSION_SECRET=dev docker compose up --build   # http://loca
 
 **Deploy (Render / Railway / Fly.io):** the multi-stage `Dockerfile` builds the SPA and
 the Python serving image; `render.yaml` provisions a web service with a 1 GB persistent
-disk mounted at `/data`. Set `APP_PASSWORD`, `SESSION_SECRET`, and (for snapshot sync)
-`SNAPSHOT_URL` + S3/R2 credentials. On boot and on `POST /api/admin/reload`, the app pulls
-the latest published snapshot onto the volume.
+disk mounted at `/data`. Set `APP_PASSWORD`, `SESSION_SECRET`, `ODDS_API_KEY`, and (for
+snapshot sync) `SNAPSHOT_URL` + S3/R2 credentials. On boot and on `POST /api/admin/reload`,
+the app pulls the latest published snapshot onto the volume.
+
+The serving image already carries the full pipeline deps, so **Pull data works on a
+deployed instance too** — though `stats.nba.com` often blocks cloud IPs, so an NBA game-log
+ingest may fail there (the pull isolates each stage and still refreshes odds + reprices
+edges from whatever succeeds). To propagate a container-side pull back to other machines,
+set `PUBLISH_AFTER_PULL=1` (with `SNAPSHOT_URL` + write creds): each pull then re-publishes
+a snapshot your laptop can `python -m webapp.snapshot --sync`. Locally this is unnecessary
+— the shared `DB_PATH` already keeps everything in sync.
 
 **Snapshot publishing** packages a WAL-checkpointed copy of `sports.db`, the `.pkl`
 artifacts, and the paper ledger into a `.tar.gz` (+ a `latest.json` manifest) and uploads
