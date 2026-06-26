@@ -50,9 +50,11 @@ def ingest_history(sport: str, db_path: str) -> None:
     elif sport == "tennis":
         from ingestion.tennis import fetch_seasons, fetch_weather
         from ingestion.tennis_clean import clean
+        from ingestion.tennis_results import fetch_wta_results
         fetch_seasons(TENNIS_YEARS, TENNIS_TOURS, db_path)
         fetch_weather(db_path)
         clean(db_path)
+        fetch_wta_results(db_path, years=TENNIS_YEARS)
     else:
         from ingestion.nhl import fetch_seasons
         fetch_seasons(SEASONS, db_path)
@@ -66,9 +68,11 @@ def ingest_recent(sport: str, db_path: str) -> None:
     elif sport == "tennis":
         from ingestion.tennis import fetch_recent, fetch_weather
         from ingestion.tennis_clean import clean
+        from ingestion.tennis_results import fetch_wta_results
         fetch_recent(db_path, TENNIS_TOURS)
         fetch_weather(db_path)
         clean(db_path)
+        fetch_wta_results(db_path)
     else:
         from ingestion.nhl import fetch_recent_games
         fetch_recent_games(days_back=7, db_path=db_path)

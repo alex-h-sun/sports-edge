@@ -282,17 +282,69 @@ def _opponent_from_game(game: str, selection: str) -> str | None:
     return None
 
 
-def _tennis_result(conn, selection, game, placed_date, today) -> tuple[str, bool] | None:
-    """Settle a tennis moneyline bet against ``tennis_matches_clean``.
+def _match_in_rows(rows, selection, opponent) -> tuple[str, bool] | None:
+    """Find the bet's result among (match_date, winner, loser) rows.
 
-    Settlement requires BOTH the selection and its stored opponent to appear in a
-    single match row, which pins the result to the bet's actual match rather than
-    the earliest match the player happens to appear in (the old name-only scan
-    mis-settled rematches and shared surnames). The date floor is widened by
-    ``TENNIS_DATE_SLACK`` because ``match_date`` is the tournament start, which can
-    precede a mid-tournament bet's placed_date. When the matchup can't be parsed
-    into two players, fall back to the legacy single-name scan.
+    With a known ``opponent`` (parsed from the stored matchup), require BOTH
+    players in one row so the result is pinned to the bet's actual match rather
+    than the earliest match the player appears in. Without one, fall back to a
+    single-name scan.
     """
+    if opponent is not None:
+        for match_date, winner, loser in rows:
+            if _name_match(selection, winner or "") and _name_match(opponent, loser or ""):
+                return match_date, True
+            if _name_match(selection, loser or "") and _name_match(opponent, winner or ""):
+                return match_date, False
+        return None
+    for match_date, winner, loser in rows:
+        if _name_match(selection, winner or ""):
+            return match_date, True
+        if _name_match(selection, loser or ""):
+            return match_date, False
+    return None
+
+
+def _wta_results_match(conn, selection, opponent, placed_date, today) -> tuple[str, bool] | None:
+    """Settle against the WTA API feed (``tennis_wta_results``), if present.
+
+    This feed carries the *real* per-match date and full names, so a tight floor
+    suffices (a few days of slack absorbs timezone/placement timing). Returns None
+    when the table is absent (fresh DB / ATP-only) so the caller falls back.
+    """
+    try:
+        floor = (date.fromisoformat(placed_date) - timedelta(days=3)).isoformat()
+    except ValueError:
+        floor = placed_date
+    try:
+        rows = conn.execute(
+            """SELECT match_date, winner_name, loser_name FROM tennis_wta_results
+               WHERE match_date >= ? AND match_date < ? ORDER BY match_date ASC""",
+            (floor, today),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None  # table not created in this DB
+    return _match_in_rows(rows, selection, opponent)
+
+
+def _tennis_result(conn, selection, game, placed_date, today) -> tuple[str, bool] | None:
+    """Settle a tennis moneyline bet, preferring the precise WTA results feed.
+
+    Tries ``tennis_wta_results`` first (real match dates + full names from the WTA
+    API). Falls back to the Sackmann-derived ``tennis_matches_clean`` (covers ATP
+    and historical WTA), whose ``match_date`` is the tournament START — shared by
+    every match in the event — so the floor is widened by ``TENNIS_DATE_SLACK`` to
+    absorb that offset. Both paths require BOTH the selection and its stored
+    opponent in a single row, pinning the result to the bet's actual match (the old
+    name-only scan mis-settled rematches and shared surnames). When the matchup
+    can't be parsed into two players, a single-name scan is used.
+    """
+    opponent = _opponent_from_game(game, selection)
+
+    hit = _wta_results_match(conn, selection, opponent, placed_date, today)
+    if hit is not None:
+        return hit
+
     try:
         floor = (date.fromisoformat(placed_date) - timedelta(days=TENNIS_DATE_SLACK)).isoformat()
     except ValueError:
@@ -302,25 +354,7 @@ def _tennis_result(conn, selection, game, placed_date, today) -> tuple[str, bool
            WHERE match_date >= ? AND match_date < ? ORDER BY match_date ASC""",
         (floor, today),
     ).fetchall()
-
-    opponent = _opponent_from_game(game, selection)
-    if opponent is not None:
-        for match_date, winner, loser in rows:
-            if _name_match(selection, winner or "") and _name_match(opponent, loser or ""):
-                return match_date, True
-            if _name_match(selection, loser or "") and _name_match(opponent, winner or ""):
-                return match_date, False
-        return None
-
-    # Unparseable matchup: best-effort name-only scan from the placed date.
-    for match_date, winner, loser in rows:
-        if match_date < placed_date:
-            continue
-        if _name_match(selection, winner or ""):
-            return match_date, True
-        if _name_match(selection, loser or ""):
-            return match_date, False
-    return None
+    return _match_in_rows(rows, selection, opponent)
 
 
 _RESULT_FN = {"NBA": _nba_result, "NHL": _nhl_result, "TENNIS": _tennis_result}

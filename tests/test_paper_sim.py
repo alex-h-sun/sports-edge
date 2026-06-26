@@ -198,6 +198,65 @@ def test_tennis_voids_when_match_absent(tmp_path):
     assert rows[0]["status"] == "void"
 
 
+def _wta_results_db(tmp_path, results):
+    # results: list of (match_date, winner_name, loser_name)
+    db = tmp_path / "wta.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE tennis_wta_results (match_date TEXT, winner_name TEXT, loser_name TEXT)"
+    )
+    # also create the Sackmann table so the fallback path has something to scan
+    conn.execute(
+        "CREATE TABLE tennis_matches_clean (match_date TEXT, winner_name TEXT, loser_name TEXT)"
+    )
+    conn.executemany("INSERT INTO tennis_wta_results VALUES (?,?,?)", results)
+    conn.commit()
+    conn.close()
+    return str(db)
+
+
+def test_settles_against_wta_results_feed_with_real_date(tmp_path):
+    # The WTA feed carries the real match date (06-17), later than the tournament
+    # start. Settlement should use it and resolve precisely.
+    db = _wta_results_db(tmp_path, [("2026-06-17", "Eva Lys", "Ann Li")])
+    rows = [_tennis_bet("Eva Lys", "Eva Lys vs Ann Li", placed_date="2026-06-16")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "won"
+    assert rows[0]["game_date"] == "2026-06-17"
+
+
+def test_wta_feed_takes_precedence_over_sackmann(tmp_path):
+    # Both tables have the match; the feed (real date) should win.
+    db = _wta_results_db(tmp_path, [("2026-06-17", "Ann Li", "Eva Lys")])  # Lys lost per feed
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO tennis_matches_clean VALUES (?,?,?)",
+        ("2026-06-15", "Eva Lys", "Ann Li"),  # Sackmann says Lys won, tournament-start date
+    )
+    conn.commit()
+    conn.close()
+    rows = [_tennis_bet("Eva Lys", "Eva Lys vs Ann Li", placed_date="2026-06-16")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "lost"          # feed wins
+    assert rows[0]["game_date"] == "2026-06-17"
+
+
+def test_wta_winner_loser_decoding():
+    from ingestion import tennis_results as tr
+    base = {
+        "PlayerNameFirstA": "Jessica", "PlayerNameLastA": "Pegula",
+        "PlayerNameFirstB": "Karolina", "PlayerNameLastB": "Muchova",
+    }
+    assert tr._winner_loser({**base, "Winner": "2"}) == ("Jessica Pegula", "Karolina Muchova")
+    assert tr._winner_loser({**base, "Winner": "3"}) == ("Karolina Muchova", "Jessica Pegula")
+    # No Winner field -> derive from sets (B wins 2-0)
+    derived = tr._winner_loser({
+        **base, "Winner": "", "ScoreSet1A": "3", "ScoreSet1B": "6",
+        "ScoreSet2A": "4", "ScoreSet2B": "6",
+    })
+    assert derived == ("Karolina Muchova", "Jessica Pegula")
+
+
 def test_name_match_handles_substring_and_surname():
     assert ps._name_match("Knicks", "New York Knicks")
     assert ps._name_match("New York Knicks", "Knicks")
