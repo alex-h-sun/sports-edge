@@ -27,8 +27,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import os
+import re
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from edge.calculator import american_to_decimal, kelly_stake
@@ -42,6 +43,11 @@ SIM_MIN_EDGE = 0.07
 KELLY_FRACTION = 0.25
 MIN_STAKE = 1.0          # dust / ruin floor: skip bets the bankroll can't cover
 STALE_DAYS = 5           # an unmatched bet older than this is voided (stake refunded)
+# tennis_matches_clean.match_date is the tournament START date (shared by every
+# match in the event), so a bet placed mid-tournament can carry a placed_date that
+# is *after* its own match's start date. Widen the settlement floor by a fortnight
+# to absorb that offset; requiring BOTH players to appear in one row keeps it precise.
+TENNIS_DATE_SLACK = 16
 
 # columns persisted to the ledger CSV, in order
 FIELDNAMES = [
@@ -229,7 +235,7 @@ def _name_match(selection: str, candidate: str) -> bool:
     return a.split()[-1] == b.split()[-1]
 
 
-def _nba_result(conn, selection, placed_date, today) -> tuple[str, bool] | None:
+def _nba_result(conn, selection, game, placed_date, today) -> tuple[str, bool] | None:
     rows = conn.execute(
         """SELECT game_date, team_name, wl FROM nba_team_games
            WHERE game_date >= ? AND game_date < ? ORDER BY game_date ASC""",
@@ -241,7 +247,7 @@ def _nba_result(conn, selection, placed_date, today) -> tuple[str, bool] | None:
     return None
 
 
-def _nhl_result(conn, selection, placed_date, today) -> tuple[str, bool] | None:
+def _nhl_result(conn, selection, game, placed_date, today) -> tuple[str, bool] | None:
     team_id = next(
         (tid for tid, name in NHL_TEAM_NAMES.items() if _name_match(selection, name)),
         None,
@@ -259,13 +265,57 @@ def _nhl_result(conn, selection, placed_date, today) -> tuple[str, bool] | None:
     return row[0], (row[1] == "W")
 
 
-def _tennis_result(conn, selection, placed_date, today) -> tuple[str, bool] | None:
+def _opponent_from_game(game: str, selection: str) -> str | None:
+    """The other player in a tennis matchup stored as ``"A vs B"``.
+
+    Returns the side that is NOT ``selection``, or None if the matchup can't be
+    parsed into two players (so the caller can fall back to a name-only scan).
+    """
+    parts = re.split(r"\s+vs\.?\s+", game or "", flags=re.IGNORECASE)
+    if len(parts) != 2:
+        return None
+    a, b = parts[0].strip(), parts[1].strip()
+    if _name_match(selection, a):
+        return b
+    if _name_match(selection, b):
+        return a
+    return None
+
+
+def _tennis_result(conn, selection, game, placed_date, today) -> tuple[str, bool] | None:
+    """Settle a tennis moneyline bet against ``tennis_matches_clean``.
+
+    Settlement requires BOTH the selection and its stored opponent to appear in a
+    single match row, which pins the result to the bet's actual match rather than
+    the earliest match the player happens to appear in (the old name-only scan
+    mis-settled rematches and shared surnames). The date floor is widened by
+    ``TENNIS_DATE_SLACK`` because ``match_date`` is the tournament start, which can
+    precede a mid-tournament bet's placed_date. When the matchup can't be parsed
+    into two players, fall back to the legacy single-name scan.
+    """
+    try:
+        floor = (date.fromisoformat(placed_date) - timedelta(days=TENNIS_DATE_SLACK)).isoformat()
+    except ValueError:
+        floor = placed_date
     rows = conn.execute(
         """SELECT match_date, winner_name, loser_name FROM tennis_matches_clean
            WHERE match_date >= ? AND match_date < ? ORDER BY match_date ASC""",
-        (placed_date, today),
+        (floor, today),
     ).fetchall()
+
+    opponent = _opponent_from_game(game, selection)
+    if opponent is not None:
+        for match_date, winner, loser in rows:
+            if _name_match(selection, winner or "") and _name_match(opponent, loser or ""):
+                return match_date, True
+            if _name_match(selection, loser or "") and _name_match(opponent, winner or ""):
+                return match_date, False
+        return None
+
+    # Unparseable matchup: best-effort name-only scan from the placed date.
     for match_date, winner, loser in rows:
+        if match_date < placed_date:
+            continue
         if _name_match(selection, winner or ""):
             return match_date, True
         if _name_match(selection, loser or ""):
@@ -297,7 +347,10 @@ def settle_ledger(
         try:
             for r in open_rows:
                 fn = _RESULT_FN.get(str(r.get("sport", "")).upper())
-                res = fn(conn, r["selection"], r["placed_date"], today) if fn else None
+                res = (
+                    fn(conn, r["selection"], r.get("game", ""), r["placed_date"], today)
+                    if fn else None
+                )
                 if res is not None:
                     game_date, won = res
                     r["game_date"] = game_date

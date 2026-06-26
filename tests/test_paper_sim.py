@@ -135,6 +135,69 @@ def test_open_bet_stays_open_within_window(tmp_path):
     assert rows[0]["status"] == "open"
 
 
+def _tennis_bet(selection, game, placed_date="2026-06-16", odds=-150):
+    return {
+        "bet_id": selection[:6], "placed_date": placed_date, "game_date": "",
+        "sport": "TENNIS", "market": "Moneyline", "game": game, "selection": selection,
+        "odds": odds, "odds_decimal": american_to_decimal(odds), "model_prob": 0.6,
+        "edge": 0.08, "stake": 100.0, "status": "open", "profit": None, "balance": None,
+    }
+
+
+def _tennis_db(tmp_path, matches):
+    # matches: list of (match_date, winner_name, loser_name)
+    db = tmp_path / "tennis.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE tennis_matches_clean (match_date TEXT, winner_name TEXT, loser_name TEXT)"
+    )
+    conn.executemany("INSERT INTO tennis_matches_clean VALUES (?,?,?)", matches)
+    conn.commit()
+    conn.close()
+    return str(db)
+
+
+def test_tennis_settles_mid_tournament_bet_despite_start_date(tmp_path):
+    # match_date is the tournament START (06-15), placed_date is mid-tournament (06-16).
+    # The widened floor must still find the match instead of voiding it.
+    db = _tennis_db(tmp_path, [("2026-06-15", "Jessica Pegula", "Karolina Muchova")])
+    rows = [_tennis_bet("Jessica Pegula", "Jessica Pegula vs Karolina Muchova")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "won"
+    assert rows[0]["game_date"] == "2026-06-15"
+    assert rows[0]["profit"] > 0
+
+
+def test_tennis_loss_settles_with_negative_profit(tmp_path):
+    db = _tennis_db(tmp_path, [("2026-06-15", "Karolina Muchova", "Jessica Pegula")])
+    rows = [_tennis_bet("Jessica Pegula", "Jessica Pegula vs Karolina Muchova")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "lost"
+    assert rows[0]["profit"] == -100.0
+
+
+def test_tennis_matchup_disambiguates_earlier_match(tmp_path):
+    # The selection plays an EARLIER match (different opponent) inside the window.
+    # Name-only settlement would have settled against that earlier match; the
+    # matchup-aware logic must pin to the row containing BOTH stored players.
+    db = _tennis_db(tmp_path, [
+        ("2026-06-10", "Other Player", "Jessica Pegula"),       # earlier loss vs someone else
+        ("2026-06-15", "Jessica Pegula", "Karolina Muchova"),   # the bet's actual match (win)
+    ])
+    rows = [_tennis_bet("Jessica Pegula", "Jessica Pegula vs Karolina Muchova")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "won"
+    assert rows[0]["game_date"] == "2026-06-15"
+
+
+def test_tennis_voids_when_match_absent(tmp_path):
+    # No result row at all -> stays unsettled, voids past the stale window.
+    db = _tennis_db(tmp_path, [])
+    rows = [_tennis_bet("Jessica Pegula", "Jessica Pegula vs Karolina Muchova")]
+    rows = ps.settle_ledger(rows, db, today="2026-06-25", start=1000.0)
+    assert rows[0]["status"] == "void"
+
+
 def test_name_match_handles_substring_and_surname():
     assert ps._name_match("Knicks", "New York Knicks")
     assert ps._name_match("New York Knicks", "Knicks")
